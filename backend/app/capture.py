@@ -18,6 +18,9 @@ from .rules import Side
 HIT_WINDOW_S = 1.5  # a swing must precede the point-end contact by at most this
 HIT_TOLERANCE_S = 0.05  # allow for camera/sensor timestamp jitter
 FRAME_STALE_S = 10.0  # a camera counts as live only if it posted a preview frame this recently
+# The setup screen polls detections every 1s while open (MatchSetup.tsx); treat
+# that as "someone's actively setting up a match" for this long after the last poll.
+SETUP_HEARTBEAT_STALE_S = 3.0
 
 UNKNOWN = "unknown"
 
@@ -143,6 +146,11 @@ class CaptureHub:
     device_params: dict[str, dict] = field(default_factory=dict)
     # Latest preview JPEG per camera, for the live-preview panel: camera -> (bytes, ts).
     frames: dict[Side, tuple[bytes, float]] = field(default_factory=dict)
+    # Latest per-face evidence a camera reported (spec §3 device API), including
+    # faces present but not confirmed to any player — for "new face, register?".
+    face_evidence: dict[Side, list[dict]] = field(default_factory=lambda: {Side.A: [], Side.B: []})
+    # Last time the setup screen polled detections — see SETUP_HEARTBEAT_STALE_S.
+    setup_seen: float | None = None
     _next_request: int = 1
 
     def record_frame(self, camera: Side, jpeg: bytes, ts: float) -> None:
@@ -158,6 +166,16 @@ class CaptureHub:
                 "last_seen": last_seen,
             }
         return status
+
+    def mark_setup_seen(self) -> None:
+        self.setup_seen = now()
+
+    def camera_needed(self, live_match_exists: bool) -> bool:
+        """Whether a camera worker should be actively capturing/analysing right
+        now: a match is live, or the setup screen is currently open (inferred
+        from its own detections poll — see mark_setup_seen)."""
+        setup_active = self.setup_seen is not None and now() - self.setup_seen < SETUP_HEARTBEAT_STALE_S
+        return live_match_exists or setup_active
 
     def request_enroll(self, camera: Side, player_id: int) -> EnrollRequest:
         # One pending request per camera: a newer pick replaces an older one.

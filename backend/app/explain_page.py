@@ -4,8 +4,9 @@ evidence, per-match point-by-point reasoning, and each player's style tags."""
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from fastapi import Depends, FastAPI, Query, Request
 from fastapi.responses import HTMLResponse
@@ -24,10 +25,14 @@ from .rules import MERCY_SHUTOUT_AT, Format
 
 templates = Jinja2Templates(directory=Path(__file__).parent / "templates")
 
+# The office is in India; show every timestamp on this page in IST regardless
+# of what timezone the server itself is running in.
+IST = ZoneInfo("Asia/Kolkata")
+
 
 def clock(epoch: float) -> str:
-    """Device timestamps (epoch seconds) as local wall-clock time, to the ms."""
-    return datetime.fromtimestamp(epoch).astimezone().strftime("%H:%M:%S.%f")[:-3]
+    """Device timestamps (epoch seconds, UTC) as IST wall-clock time, to the ms."""
+    return datetime.fromtimestamp(epoch, IST).strftime("%H:%M:%S.%f")[:-3]
 
 
 templates.env.filters["clock"] = clock
@@ -53,7 +58,11 @@ def group_of(kind: str) -> str:
 
 
 def local(ts: datetime) -> datetime:
-    return ts.astimezone() if ts.tzinfo else ts
+    """DB timestamps are written as UTC (models.utcnow); SQLite can hand them
+    back naive, so treat a naive value as UTC rather than as already-local."""
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=timezone.utc)
+    return ts.astimezone(IST)
 
 
 def rules_in_force() -> list[dict]:

@@ -26,6 +26,7 @@ export function LiveScoreboard() {
   const [error, setError] = useState<string | null>(null);
   const [cameraStatus, setCameraStatus] = useState<Record<SideKey, CameraStatus> | null>(null);
   const [showCameras, setShowCameras] = useState(false);
+  const [confirmEnd, setConfirmEnd] = useState(false);
 
   useEffect(() => {
     api.config().then((c) => setCaptureWinType(c.capture_win_type));
@@ -88,6 +89,12 @@ export function LiveScoreboard() {
   const undo = useCallback(() => {
     setTag(null);
     run(() => api.undo(matchId));
+  }, [matchId, run]);
+
+  const endMatch = useCallback(() => {
+    setConfirmEnd(false);
+    setTag(null);
+    run(() => api.endMatch(matchId));
   }, [matchId, run]);
 
   // Also on an attached keyboard: Backspace / Ctrl+Z.
@@ -168,6 +175,7 @@ export function LiveScoreboard() {
             {m.status !== "abandoned" && m.points_played > 0 && (
               <UndoButton disabled={busy} onClick={undo} />
             )}
+            {live && <EndMatchButton disabled={busy} onClick={() => setConfirmEnd(true)} />}
             {live && m.deuce && <Pill>DEUCE</Pill>}
             {m.status === "abandoned" && (
               <Link to="/setup" style={{ textDecoration: "none" }}>
@@ -213,6 +221,13 @@ export function LiveScoreboard() {
         )}
 
         {m.status === "finished" && <MatchEndOverlay m={m} busy={busy} onRematch={rematch} />}
+        {confirmEnd && (
+          <EndMatchConfirm
+            busy={busy}
+            onConfirm={endMatch}
+            onCancel={() => setConfirmEnd(false)}
+          />
+        )}
       </div>
     </Stage>
   );
@@ -273,6 +288,119 @@ function UndoButton({ onClick, disabled }: { onClick: () => void; disabled: bool
         </div>
       </div>
     </button>
+  );
+}
+
+function EndMatchButton({ onClick, disabled }: { onClick: () => void; disabled: boolean }) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      aria-label="End match"
+      style={{ background: "none", border: "none", padding: 9, margin: -9 }}
+    >
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 6,
+          padding: "6px 14px",
+          border: `1px solid rgba(255,107,74,0.4)`,
+          borderRadius: 999,
+          opacity: disabled ? 0.5 : 1,
+        }}
+      >
+        <div
+          className="mono"
+          style={{ fontSize: 11, letterSpacing: 1.5, color: C.coral, fontWeight: 700 }}
+        >
+          END MATCH
+        </div>
+      </div>
+    </button>
+  );
+}
+
+function EndMatchConfirm({
+  busy,
+  onConfirm,
+  onCancel,
+}: {
+  busy: boolean;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <div
+      style={{
+        position: "absolute",
+        inset: 0,
+        zIndex: 20,
+        background: "rgba(11,13,16,0.85)",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 24,
+      }}
+    >
+      <div
+        role="alertdialog"
+        aria-label="Confirm ending the match"
+        style={{
+          width: 380,
+          maxWidth: "100%",
+          background: C.surface,
+          border: `1px solid ${C.border}`,
+          borderRadius: 18,
+          padding: 24,
+          display: "flex",
+          flexDirection: "column",
+          gap: 8,
+          textAlign: "center",
+        }}
+      >
+        <div style={{ fontSize: 18, fontWeight: 800 }}>End this match?</div>
+        <div style={{ fontSize: 13, color: C.subtle, lineHeight: 1.5 }}>
+          The score so far won't be saved and neither player's rating will change —
+          same as abandoning it. This can't be undone.
+        </div>
+        <div style={{ display: "flex", gap: 10, marginTop: 14 }}>
+          <button
+            onClick={onCancel}
+            disabled={busy}
+            style={{
+              flex: 1,
+              padding: "12px 0",
+              border: `1.5px solid ${C.border}`,
+              borderRadius: 12,
+              background: "transparent",
+              color: C.text,
+              fontSize: 14,
+              fontWeight: 700,
+            }}
+          >
+            Cancel
+          </button>
+          <button
+            onClick={onConfirm}
+            disabled={busy}
+            style={{
+              flex: 1,
+              padding: "12px 0",
+              border: "none",
+              borderRadius: 12,
+              background: C.coral,
+              color: C.bg,
+              fontSize: 14,
+              fontWeight: 800,
+              opacity: busy ? 0.6 : 1,
+            }}
+          >
+            End Match
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 

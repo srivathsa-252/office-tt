@@ -63,7 +63,9 @@ Tests: `cd backend && .venv/bin/pytest`. They run on SQLite by default. Set `TES
 
 - **The rules engine is pure.** `MatchEngine` is a state machine that follows spec §2. The database stores only points. Live state comes from replaying a match's point winners, so the server holds no hidden state and **undo** means "delete the last point and replay". Undoing the match-winning point reopens the match and reverts its rating change. This is refused if either player has been rated in a later match.
 - **Live push.** Every score change is broadcast on `WS /ws/matches/{id}` as the full match state. The scoreboard renders whatever it receives. Writes are serialised, so two taps can't race.
-- **Ratings are computed at match close.** Individual Glicko-2 ratings come from singles. Doubles rates the **pair** as its own entity. At close, each pair's rating-history row also stores the win probability predicted from the partners' individual ratings, which is the baseline for synergy. Abandoned matches (a new match started over a live one) are never rated.
+- **Ratings are computed at match close.** Individual Glicko-2 ratings come from singles. Doubles rates the **pair** as its own entity. At close, each pair's rating-history row also stores the win probability predicted from the partners' individual ratings, which is the baseline for synergy. Abandoned matches (a new match started over a live one, or ended manually — see below) are never rated.
+- **Ending a match manually.** The scoreboard has an **END MATCH** pill next to UNDO, live only, behind a confirm dialog. It abandons the match exactly like starting a new one over a live match does: never rated, since a match stopped mid-game has no well-defined winner. `POST /api/matches/{id}/end`.
+- **Cameras pause when nobody needs them.** A camera worker polls `GET /api/capture/camera-needed`, which is true only while there's a live match or the setup screen is open (inferred from its own detections poll — see `capture.SETUP_HEARTBEAT_STALE_S`). Idle, it stops running pose/face inference and stops posting the preview — near-zero CPU/bandwidth — but keeps the OS camera handle open so resuming is instant rather than re-opening the device.
 
 ### Face recognition (built from scratch, no Chitrachaya)
 
@@ -75,6 +77,14 @@ Two pretrained OpenCV Zoo models do the pixel work: YuNet finds faces, and SFace
 - **Auto-enroll.** After a manual pick, a camera learns the face only if it's the single unrecognised face in view, confident (≥ 0.9) and at least 80 px. It takes 5 samples, all of which must be the same person. Otherwise it gives up after 15 s and logs why.
 
 Checked on a real photo: after enrolling one person from a solo shot, the system finds them in a group of six at similarity 0.59, while the five others stay below 0.363 (the closest reached 0.33).
+
+### Match setup
+
+The setup screen's Format card is editable: **serves per turn** (3 or 5), **games per match** (best of 1/3/5), and **cameras** (1 or 2) — all local to the browser except serves/games, which go to the new match's format. Points-to-win, win-margin and the deuce trigger stay fixed.
+
+**One camera instead of two.** With Cameras set to 1, both sides draw from camera A's detections instead of one camera per side — the roster still fills Side A before Side B, first-detected-first-assigned. `POST /api/capture/enroll-requests` targets camera A for both sides too, so auto-enroll after a manual pick still works. The camera-count choice is saved per browser (`localStorage`), not sent to the API — it only changes how the setup screen reads detections, since which camera workers are actually running is an operational fact the app doesn't control.
+
+**New face, register?** `GET /api/capture/detections` now reports `unknown_present` per camera — a face was seen that didn't confidently match anyone (`player_id: null` in what the camera posted), not necessarily a stranger — presence-smoothing might just not have confirmed them yet. When true and a slot is still open, a dismissible banner offers to register them immediately, instead of waiting for a manual "Waiting for face…" tap; registering opens the same picker sheet, name field focused. Every face-rec-picked card also gets a small **"Not them?"** label under "✓ Detected", making the existing tap-to-correct flow visible instead of relying on people discovering it.
 
 ### Swings and the last hitter
 
@@ -88,6 +98,8 @@ Checked on a real photo: after enrolling one person from a solo shot, the system
 A contact mic under the table is read at 16 kHz. A contact is a sharp peak (first difference, which drops hum) above both the threshold and 6× the running noise floor, followed by a 60 ms refractory period. `--calibrate` records 5 s of quiet and 8 s of bounces, then suggests a threshold between the two. The serial mode is for a microcontroller that does its own detection and prints one line per contact.
 
 ### The decision log (`/decisions`)
+
+Timestamps on this page are always **IST** (`Asia/Kolkata`), regardless of what timezone the server process itself is running in.
 
 Every decision is written to the `decision` table where it's made, as a plain-English sentence plus its evidence. It records:
 - the serve (and why it did or didn't pass), deuce, game and match results, and "no game yet at 21–20" checks
@@ -110,6 +122,7 @@ The page has three tabs:
 | Endpoint | Body | Used for |
 |---|---|---|
 | `POST /api/capture/detections` | `{camera, player_ids, faces?, threshold?}` | Who camera A/B recognises (smoothed), with per-face evidence. |
+| `GET /api/capture/detections` | | `{A, B}` → `{players, unknown_present}` — the setup screen polls this; `unknown_present` drives its "new face, register?" banner. |
 | `POST /api/capture/ticks` | `{ts?, strength?}` | One table contact. |
 | `POST /api/capture/hits` | `{camera, player_id?, ts?, evidence?}` | One swing. |
 | `POST /api/capture/device-params` | `{device, params}` | Thresholds a worker runs with (shown on `/decisions`). |
@@ -117,6 +130,7 @@ The page has three tabs:
 | `GET /api/capture/preview/{camera}` | | The latest JPEG posted for that camera as a single image, or 404 if none yet. |
 | `GET /api/capture/stream/{camera}` | | The same frames as a live `multipart/x-mixed-replace` MJPEG stream — what the scoreboard's preview panel actually points an `<img>` at. |
 | `GET /api/capture/camera-status` | | `{A, B}` → `{active, last_seen}`, from how recently each posted a preview frame. |
+| `GET /api/capture/camera-needed` | | `{needed}` — a worker polls this and pauses analysis/preview when false (see "Cameras pause..." above). |
 | `GET /api/face-gallery` · `POST/DELETE /api/players/{id}/faces` | `{vectors, source, request_id?}` | The face gallery. |
 | `POST/GET /api/capture/enroll-requests` · `…/{id}/failed` | | Asks a camera to learn a face. |
 

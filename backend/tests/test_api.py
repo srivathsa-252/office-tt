@@ -45,6 +45,19 @@ def test_live_scoring_flow(client):
     assert client.get("/api/matches/live").json()["id"] == m["id"]
 
 
+def test_end_match_abandons_and_never_rates(client):
+    pr, sr = add_players(client, "Praneeth", "Sri")
+    m = singles(client, pr, sr)
+    win(client, m["id"], "A", 3)
+    s = client.post(f"/api/matches/{m['id']}/end").json()
+    assert s["status"] == "abandoned"
+    assert client.get("/api/matches/live").status_code == 404
+    stats = client.get(f"/api/players/{pr}/stats").json()
+    assert stats["matches_played"] == 0 and stats["rating"] == 1500
+    # Already abandoned: ending it again is a conflict, not a silent no-op.
+    assert client.post(f"/api/matches/{m['id']}/end").status_code == 409
+
+
 def test_websocket_pushes_each_point(client):
     pr, sr = add_players(client, "Praneeth", "Sri")
     m = singles(client, pr, sr)
@@ -185,7 +198,30 @@ def test_detections_roundtrip(client):
         == 204
     )
     d = client.get("/api/capture/detections").json()
-    assert [p["name"] for p in d["A"]] == ["Praneeth", "Abin"] and d["B"] == []
+    assert [p["name"] for p in d["A"]["players"]] == ["Praneeth", "Abin"]
+    assert d["B"]["players"] == []
+    assert d["A"]["unknown_present"] is False and d["B"]["unknown_present"] is False
+
+
+def test_detections_flags_unrecognised_faces(client):
+    client.post(
+        "/api/capture/detections",
+        json={
+            "camera": "A",
+            "player_ids": [],
+            "faces": [{"player_id": None, "best_player_id": None, "similarity": 0.1}],
+        },
+    )
+    d = client.get("/api/capture/detections").json()
+    assert d["A"]["unknown_present"] is True
+
+
+def test_camera_needed_reflects_live_match_and_setup_heartbeat(client):
+    assert client.get("/api/capture/camera-needed").json() == {"needed": False}
+    # Polling detections (what the setup screen does every second) is itself
+    # the "someone's setting up a match" signal.
+    client.get("/api/capture/detections")
+    assert client.get("/api/capture/camera-needed").json() == {"needed": True}
 
 
 def test_preview_frame_roundtrip(client):

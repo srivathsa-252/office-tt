@@ -1,4 +1,13 @@
-import type { CameraStatus, Config, Format, MatchState, PlayerRef, PlayerStats, WinType } from "./types";
+import type {
+  CameraStatus,
+  Config,
+  Detections,
+  Format,
+  MatchState,
+  PlayerRef,
+  PlayerStats,
+  WinType,
+} from "./types";
 import type { SideKey } from "./theme";
 
 async function req<T>(method: string, path: string, body?: unknown): Promise<T> {
@@ -21,7 +30,7 @@ export const api = {
   playerStats: (id: number) => req<PlayerStats>("GET", `/api/players/${id}/stats`),
   requestEnroll: (camera: SideKey, player_id: number) =>
     req<{ id: number }>("POST", "/api/capture/enroll-requests", { camera, player_id }),
-  detections: () => req<Record<SideKey, PlayerRef[]>>("GET", "/api/capture/detections"),
+  detections: () => req<Detections>("GET", "/api/capture/detections"),
   cameraStatus: () => req<Record<SideKey, CameraStatus>>("GET", "/api/capture/camera-status"),
   previewUrl: (camera: SideKey) => `/api/capture/preview/${camera}`,
   streamUrl: (camera: SideKey) => `/api/capture/stream/${camera}`,
@@ -38,6 +47,7 @@ export const api = {
   scorePoint: (id: number, winner: SideKey, win_type: WinType | null) =>
     req<MatchState>("POST", `/api/matches/${id}/points`, { winner, win_type }),
   undo: (id: number) => req<MatchState>("DELETE", `/api/matches/${id}/points/last`),
+  endMatch: (id: number) => req<MatchState>("POST", `/api/matches/${id}/end`),
 };
 
 /** Live match state over WebSocket, reconnecting with backoff. */

@@ -52,6 +52,15 @@ export interface CameraStatus {
   last_seen: number | null;
 }
 
+export interface CameraDetections {
+  players: PlayerRef[];
+  // A face was seen this camera couldn't confidently match to anyone —
+  // "new face" for the setup screen's register prompt.
+  unknown_present: boolean;
+}
+
+export type Detections = Record<SideKey, CameraDetections>;
+
 export interface Synergy {
   pair_id: number;
   partner: PlayerRef;

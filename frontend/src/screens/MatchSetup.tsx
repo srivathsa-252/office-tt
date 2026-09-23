@@ -1,28 +1,47 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api";
 import { Avatar, CheckIcon } from "../components/Avatar";
 import { Stage } from "../components/Stage";
 import { C, SIDE, type SideKey } from "../theme";
-import type { Format, PlayerRef } from "../types";
+import type { Detections, Format, PlayerRef } from "../types";
 
 type Mode = "singles" | "doubles";
 type Slot = { player: PlayerRef; source: "detected" | "manual" } | null;
 const SIDES: SideKey[] = ["A", "B"];
 const DETECTION_POLL_MS = 1000;
+const NO_DETECTIONS: Detections = {
+  A: { players: [], unknown_present: false },
+  B: { players: [], unknown_present: false },
+};
+const CAMERA_COUNT_KEY = "tt-camera-count";
+const SERVES_PER_TURN_OPTIONS = [3, 5];
+const BEST_OF_OPTIONS = [1, 3, 5];
+
+function loadCameraCount(): 1 | 2 {
+  return localStorage.getItem(CAMERA_COUNT_KEY) === "1" ? 1 : 2;
+}
 
 export function MatchSetup() {
   const navigate = useNavigate();
   const [mode, setMode] = useState<Mode>("doubles");
   const [format, setFormat] = useState<Format | null>(null);
-  const [detected, setDetected] = useState<Record<SideKey, PlayerRef[]>>({ A: [], B: [] });
+  const [cameraCount, setCameraCount] = useState<1 | 2>(loadCameraCount);
+  const [detected, setDetected] = useState<Detections>(NO_DETECTIONS);
   // Manual picks, per side and slot index — the fallback when face-rec can't see someone.
   const [manual, setManual] = useState<Record<SideKey, (PlayerRef | null)[]>>({ A: [], B: [] });
   const [firstServer, setFirstServer] = useState<Record<SideKey, number | null>>({ A: null, B: null });
-  const [picking, setPicking] = useState<{ side: SideKey; index: number } | null>(null);
+  const [picking, setPicking] = useState<{ side: SideKey; index: number; forNewFace?: boolean } | null>(
+    null,
+  );
+  const [newFaceDismissed, setNewFaceDismissed] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const need = mode === "singles" ? 1 : 2;
+
+  useEffect(() => {
+    localStorage.setItem(CAMERA_COUNT_KEY, String(cameraCount));
+  }, [cameraCount]);
 
   useEffect(() => {
     api.config().then((c) => setFormat(c.default_format));
@@ -40,6 +59,10 @@ export function MatchSetup() {
     };
   }, []);
 
+  // In 1-camera mode there's only camera A: both sides draw from its
+  // detections, and the person is assigned to whichever side still needs one.
+  const cameraFor = (side: SideKey): SideKey => (cameraCount === 1 ? "A" : side);
+
   const slots = useMemo(() => {
     const manualIds = new Set(
       SIDES.flatMap((s) => manual[s].slice(0, need).filter(Boolean).map((p) => p!.id)),
@@ -47,7 +70,7 @@ export function MatchSetup() {
     const taken = new Set(manualIds);
     const out = {} as Record<SideKey, Slot[]>;
     for (const side of SIDES) {
-      const pool = detected[side].filter((p) => !taken.has(p.id));
+      const pool = detected[cameraFor(side)].players.filter((p) => !taken.has(p.id));
       out[side] = Array.from({ length: need }, (_, i) => {
         const m = manual[side][i];
         if (m) return { player: m, source: "manual" as const };
@@ -58,11 +81,26 @@ export function MatchSetup() {
       });
     }
     return out;
-  }, [detected, manual, need]);
+  }, [detected, manual, need, cameraCount]);
 
   const roster = (side: SideKey) =>
     slots[side].filter((s): s is NonNullable<Slot> => !!s).map((s) => s.player);
   const complete = SIDES.every((s) => roster(s).length === need);
+
+  // The first still-open slot whose camera currently sees a face it can't
+  // confidently match to anyone — prompts "register this person?" instead of
+  // waiting for a manual tap.
+  const newFaceSlot = (() => {
+    for (const side of SIDES) {
+      const i = slots[side].findIndex((s) => s === null);
+      if (i !== -1 && detected[cameraFor(side)].unknown_present) return { side, index: i };
+    }
+    return null;
+  })();
+
+  useEffect(() => {
+    if (!newFaceSlot) setNewFaceDismissed(false);
+  }, [!!newFaceSlot]);
 
   // Singles: pick either player to serve first. Doubles: Side A serves first
   // (A1→B1 rotation); pick A1 and B1 within each pair.
@@ -93,6 +131,9 @@ export function MatchSetup() {
         side_b: b,
         first_server: server,
         first_receiver: receiver,
+        format: format
+          ? { serves_per_turn: format.serves_per_turn, best_of: format.best_of }
+          : undefined,
       });
       navigate(`/live/${m.id}`);
     } catch (e) {
@@ -179,6 +220,16 @@ export function MatchSetup() {
             ))}
           </div>
 
+          {newFaceSlot && !newFaceDismissed && (
+            <NewFaceBanner
+              side={newFaceSlot.side}
+              onRegister={() =>
+                setPicking({ side: newFaceSlot.side, index: newFaceSlot.index, forNewFace: true })
+              }
+              onDismiss={() => setNewFaceDismissed(true)}
+            />
+          )}
+
           {SIDES.map((side) => {
             const opts = serveOptions(side);
             return (
@@ -188,7 +239,8 @@ export function MatchSetup() {
                     style={{ width: 8, height: 8, borderRadius: "50%", background: SIDE[side].color }}
                   />
                   <div style={{ fontSize: 13, fontWeight: 700, letterSpacing: 0.3, color: C.muted }}>
-                    CAMERA {side} &middot; SIDE {side}
+                    CAMERA {cameraFor(side)}
+                    {cameraCount === 1 ? " (shared)" : ""} &middot; SIDE {side}
                   </div>
                 </div>
                 <div style={{ display: "flex", gap: 12 }}>
@@ -257,21 +309,29 @@ export function MatchSetup() {
               >
                 Format
               </div>
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "repeat(2,minmax(0,1fr))",
-                  gap: 10,
-                }}
-              >
-                <FormatCell
-                  big={`${format.points_to_win} pts`}
-                  small={`win by ${format.win_margin}`}
-                />
-                <FormatCell
-                  big={`${format.serves_per_turn} / serve`}
-                  small={`${format.deuce_serve_rotation} after ${format.deuce_trigger}–${format.deuce_trigger}`}
-                />
+
+              <PickerRow
+                label="Serves per turn"
+                options={SERVES_PER_TURN_OPTIONS}
+                value={format.serves_per_turn}
+                onChange={(v) => setFormat((f) => f && { ...f, serves_per_turn: v })}
+              />
+              <PickerRow
+                label="Games per match (best of)"
+                options={BEST_OF_OPTIONS}
+                value={format.best_of}
+                onChange={(v) => setFormat((f) => f && { ...f, best_of: v })}
+              />
+              <PickerRow
+                label="Cameras"
+                options={[1, 2]}
+                value={cameraCount}
+                onChange={(v) => setCameraCount(v as 1 | 2)}
+              />
+
+              <div style={{ fontSize: 11, color: C.faint, paddingTop: 2 }}>
+                {format.points_to_win} pts, win by {format.win_margin}; deuce from{" "}
+                {format.deuce_trigger}–{format.deuce_trigger}
               </div>
             </div>
           )}
@@ -309,10 +369,11 @@ export function MatchSetup() {
             side={picking.side}
             excluded={usedIds}
             canClear={!!manual[picking.side][picking.index]}
+            autoFocusName={!!picking.forNewFace}
             onPick={(p) => {
               setManualSlot(picking.side, picking.index, p);
-              // Ask that side's camera to learn this face, so next time it's detected.
-              if (p) api.requestEnroll(picking.side, p.id).catch(() => {});
+              // Ask that camera to learn this face, so next time it's detected.
+              if (p) api.requestEnroll(cameraFor(picking.side), p.id).catch(() => {});
               setPicking(null);
             }}
             onClose={() => setPicking(null)}
@@ -323,20 +384,99 @@ export function MatchSetup() {
   );
 }
 
-function FormatCell({ big, small }: { big: string; small: string }) {
+function PickerRow({
+  label,
+  options,
+  value,
+  onChange,
+}: {
+  label: string;
+  options: number[];
+  value: number;
+  onChange: (v: number) => void;
+}) {
   return (
-    <div>
-      <div
+    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+      <div style={{ fontSize: 12, color: C.subtle }}>{label}</div>
+      <div style={{ display: "flex", gap: 8 }}>
+        {options.map((n) => {
+          const on = value === n;
+          return (
+            <button
+              key={n}
+              aria-pressed={on}
+              onClick={() => onChange(n)}
+              style={{
+                flex: 1,
+                padding: "9px 0",
+                borderRadius: 10,
+                border: `1.5px solid ${on ? C.lime : C.border}`,
+                background: on ? "rgba(200,255,77,0.1)" : "transparent",
+                color: on ? C.lime : C.muted,
+                fontSize: 13,
+                fontWeight: on ? 700 : 600,
+              }}
+            >
+              {n}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/** Not in the design: a proactive nudge when a camera sees a face it can't
+ * confidently match, instead of waiting for a manual "Waiting for face…" tap. */
+function NewFaceBanner({
+  side,
+  onRegister,
+  onDismiss,
+}: {
+  side: SideKey;
+  onRegister: () => void;
+  onDismiss: () => void;
+}) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        gap: 10,
+        padding: "12px 14px",
+        borderRadius: 12,
+        border: `1px solid ${C.lime}`,
+        background: "rgba(200,255,77,0.08)",
+      }}
+    >
+      <svg width={18} height={18} viewBox="0 0 24 24" fill="none" stroke={C.lime} strokeWidth={2} style={{ flexShrink: 0 }}>
+        <circle cx={12} cy={8} r={4} />
+        <path d="M4 20c0-4 3.6-6 8-6s8 2 8 6" />
+      </svg>
+      <div style={{ flexGrow: 1, fontSize: 12, color: C.text, fontWeight: 600 }}>
+        New face on Side {side}&apos;s camera &mdash; register them?
+      </div>
+      <button
+        onClick={onRegister}
         style={{
-          fontSize: 20,
+          padding: "7px 14px",
+          borderRadius: 999,
+          border: "none",
+          background: C.lime,
+          color: C.bg,
+          fontSize: 12,
           fontWeight: 800,
-          fontFamily: "'Bebas Neue',sans-serif",
-          letterSpacing: 0.5,
         }}
       >
-        {big}
-      </div>
-      <div style={{ fontSize: 11, color: C.subtle }}>{small}</div>
+        Register
+      </button>
+      <button
+        onClick={onDismiss}
+        aria-label="Dismiss"
+        style={{ background: "none", border: "none", color: C.faint, fontSize: 16, padding: 4 }}
+      >
+        &times;
+      </button>
     </div>
   );
 }
@@ -408,6 +548,9 @@ function PlayerCard({ side, slot, onClick }: { side: SideKey; slot: Slot; onClic
           "Picked manually"
         )}
       </div>
+      {slot.source === "detected" && (
+        <div style={{ fontSize: 10, color: C.faint, textDecoration: "underline" }}>Not them?</div>
+      )}
     </button>
   );
 }
@@ -417,20 +560,26 @@ function PlayerPicker({
   side,
   excluded,
   canClear,
+  autoFocusName,
   onPick,
   onClose,
 }: {
   side: SideKey;
   excluded: Set<number>;
   canClear: boolean;
+  autoFocusName?: boolean;
   onPick: (p: PlayerRef | null) => void;
   onClose: () => void;
 }) {
   const [players, setPlayers] = useState<PlayerRef[]>([]);
   const [name, setName] = useState("");
+  const nameInput = useRef<HTMLInputElement>(null);
   useEffect(() => {
     api.players().then(setPlayers);
   }, []);
+  useEffect(() => {
+    if (autoFocusName) nameInput.current?.focus();
+  }, [autoFocusName]);
   const add = async () => {
     if (!name.trim()) return;
     onPick(await api.addPlayer(name.trim()));
@@ -473,7 +622,7 @@ function PlayerPicker({
             textTransform: "uppercase",
           }}
         >
-          Pick player &middot; Side {side}
+          {autoFocusName ? "Register new player" : `Pick player · Side ${side}`}
         </div>
         <div style={{ overflowY: "auto", display: "flex", flexDirection: "column", gap: 8 }}>
           {available.map((p) => (
@@ -510,6 +659,7 @@ function PlayerPicker({
           </label>
           <input
             id="new-player"
+            ref={nameInput}
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="New player name"

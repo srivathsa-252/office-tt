@@ -211,6 +211,26 @@ def score_point(
     return point
 
 
+def end_match(db: Session, hub: CaptureHub, match: Match) -> None:
+    """Manually end a live match from the scoreboard's End Match button.
+    Same as being abandoned by a new match starting: never rated, since an
+    incomplete match has no well-defined winner to rate."""
+    if match.status != "live":
+        raise ConflictError(f"match is {match.status}")
+    match.status = "abandoned"
+    match.closed_at = utcnow()
+    record(
+        db,
+        "match.abandoned",
+        f"Match #{match.id} ended manually after {len(match.points)} point(s), from the "
+        "scoreboard's End Match button. Abandoned matches are never rated.",
+        {"points_played": len(match.points)},
+        match_id=match.id,
+    )
+    db.commit()
+    hub.rally.reset()
+
+
 def undo_last_point(db: Session, hub: CaptureHub, match: Match) -> None:
     if match.status == "abandoned":
         raise ConflictError("match was abandoned")

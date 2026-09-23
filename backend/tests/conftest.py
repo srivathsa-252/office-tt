@@ -20,6 +20,8 @@ def client():
     hub.rally.reset()
     hub.detections = {k: [] for k in hub.detections}
     hub.frames = {}
+    hub.face_evidence = {k: [] for k in hub.face_evidence}
+    hub.setup_seen = None
     factory = sessionmaker(bind=engine, expire_on_commit=False)
     with TestClient(create_app(factory, init=False)) as c:
         c.session_factory = factory

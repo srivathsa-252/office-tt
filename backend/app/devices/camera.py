@@ -169,8 +169,12 @@ class CameraWorker:
         self._pending: list[dict] = []
         self._handled: set[int] = set()  # request ids finished here (poll may lag)
         self._lock = threading.Lock()
+        # Whether to actually run pose/face analysis and post a preview right
+        # now — false when there's no live match and nobody's on the setup
+        # screen. Starts True so a slow first poll doesn't sit there idle.
+        self.needed = True
 
-    # -- background polling (gallery + enroll requests) ----------------------
+    # -- background polling (gallery + enroll requests + needed) -------------
 
     def _poll_loop(self) -> None:
         last_gallery = 0.0
@@ -186,6 +190,10 @@ class CameraWorker:
                 )
                 with self._lock:
                     self._pending = pending
+                needed = bool(self.api.request("GET", "/api/capture/camera-needed")["needed"])
+                if needed != self.needed:
+                    log.info("camera %s: %s", self.side, "resuming" if needed else "pausing (idle)")
+                self.needed = needed
             except Exception as e:
                 log.warning("poll failed: %s", e)
             time.sleep(POLL_S)
@@ -342,6 +350,8 @@ class CameraWorker:
 
         def maybe_preview(frame, ts: float) -> None:
             nonlocal last_preview
+            if not self.needed:
+                return  # no live match, nobody on the setup screen — stay quiet
             if a.preview_every > 0 and ts - last_preview >= a.preview_every:
                 last_preview = ts
                 self.preview_step(frame)
@@ -386,6 +396,10 @@ class CameraWorker:
                 time.sleep(0.02)
                 continue
             last_ts = ts
+            if not self.needed:
+                # Keep the device open (cheap to resume) but do no analysis:
+                # near-zero CPU while idle.
+                continue
             self._process_frame(frame, ts)
             if ts - last_face >= a.face_every:
                 last_face = ts

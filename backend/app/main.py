@@ -28,6 +28,7 @@ from .rules import Format, Mode, Side
 from .service import (
     ConflictError,
     create_match,
+    end_match,
     live_match,
     match_state,
     player_ref,
@@ -254,6 +255,16 @@ def create_app(session_factory: sessionmaker | None = None, init: bool = True) -
                 raise HTTPException(409, str(e))
             return await broadcast(db, match)
 
+    @app.post("/api/matches/{match_id}/end")
+    async def end_match_route(match_id: int, db: Session = Depends(get_db)):
+        async with lock:
+            match = get_match(db, match_id)
+            try:
+                end_match(db, hub, match)
+            except ConflictError as e:
+                raise HTTPException(409, str(e))
+            return await broadcast(db, match)
+
     @app.websocket("/ws/matches/{match_id}")
     async def match_ws(ws: WebSocket, match_id: int):
         await ws.accept()
@@ -276,10 +287,20 @@ def create_app(session_factory: sessionmaker | None = None, init: bool = True) -
 
     @app.get("/api/capture/detections")
     def get_detections(db: Session = Depends(get_db)):
+        # The setup screen polls this every second while open — used as the
+        # signal that someone's actively setting up a match (see camera_needed).
+        hub.mark_setup_seen()
         out = {}
         for side, ids in hub.detections.items():
             players = [db.get(Player, pid) for pid in ids]
-            out[side.value] = [player_ref(p) for p in players if p is not None]
+            evidence = hub.face_evidence.get(side, [])
+            out[side.value] = {
+                "players": [player_ref(p) for p in players if p is not None],
+                # A face was seen but matched nobody confidently — "new face"
+                # for the setup screen's register-prompt, not necessarily an
+                # actual stranger (could just be mid-presence-smoothing).
+                "unknown_present": any(f.get("player_id") is None for f in evidence),
+            }
         return out
 
     @app.post("/api/capture/detections", status_code=204)
@@ -288,9 +309,16 @@ def create_app(session_factory: sessionmaker | None = None, init: bool = True) -
         # Logged only when who's recognised changes (it's posted several times a second).
         changed = set(ids) != set(hub.detections[body.camera])
         hub.detections[body.camera] = ids
+        hub.face_evidence[body.camera] = [f.model_dump() for f in body.faces]
         if changed:
             record(db, "face.detections", *explain_detections(db, body), match_id=None)
             db.commit()
+
+    @app.get("/api/capture/camera-needed")
+    def get_camera_needed(db: Session = Depends(get_db)):
+        # A camera worker polls this to decide whether to actively capture and
+        # analyse, or pause (no live match, nobody on the setup screen).
+        return {"needed": hub.camera_needed(live_match(db) is not None)}
 
     @app.post("/api/capture/ticks", status_code=204)
     async def post_tick(body: TickIn):
