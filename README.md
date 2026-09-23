@@ -121,13 +121,15 @@ The page has three tabs:
 
 `ts` is epoch seconds from the shared clock. When it's omitted, the server's time is used.
 
-**Live preview.** The scoreboard screen has a "Cameras" toggle at the bottom that opens a panel with a live JPEG per running camera worker (refreshed a few times a second, from `--preview-every`, default 0.5 s). It auto-detects how many cameras are actually posting: one running camera shows one preview full-width; two show side by side; a camera that stops posting for `capture.FRAME_STALE_S` (4 s) drops out and the panel shows an inline warning naming which side is missing, instead of freezing on a stale frame. On a narrow (phone-width) screen there's room for only one preview at a time, so a switch button flips which camera is shown.
+**Live preview.** The scoreboard screen has a "Cameras" toggle at the bottom that opens a panel with a live JPEG per running camera worker. It auto-detects how many cameras are actually posting: one running camera shows one preview full-width; two show side by side; a camera that stops posting for `capture.FRAME_STALE_S` (10 s) drops out and the panel shows an inline warning naming which side is missing, instead of freezing on a stale frame. On a narrow (phone-width) screen there's room for only one preview at a time, so a switch button flips which camera is shown.
+
+The worker posts a frame at most every `--preview-every` seconds (default 0.5 s), but the whole capture loop is synchronous — a frame isn't posted until pose + face-rec inference on it finishes, so on a CPU without GPU acceleration the real cadence can be several seconds, not 0.5 s. `--no-pose` (face-rec only, no swing detection) gives a much snappier preview if that's what you're testing.
 
 **Placeholders to tune on the real table** (all shown on `/decisions?view=rules`):
 - hit window 1.5 s
 - swing speed 4.0 shoulder-widths/s
 - sensor threshold 0.08 (or use `--calibrate`)
-- camera considered live: posted a preview frame in the last 4 s
+- camera considered live: posted a preview frame in the last 10 s
 - style-tag thresholds
 
 What I couldn't test here: real webcams, a real contact mic, and swing detection on real table-tennis footage. I only tested it on a synthetic clip made by sliding a still photo. The logic is unit-tested and the models were run on real photos.

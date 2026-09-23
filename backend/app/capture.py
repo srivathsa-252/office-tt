@@ -17,7 +17,7 @@ from .rules import Side
 # Placeholders — tune once the sensor and cameras are on the table.
 HIT_WINDOW_S = 1.5  # a swing must precede the point-end contact by at most this
 HIT_TOLERANCE_S = 0.05  # allow for camera/sensor timestamp jitter
-FRAME_STALE_S = 4.0  # a camera counts as live only if it posted a preview frame this recently
+FRAME_STALE_S = 10.0  # a camera counts as live only if it posted a preview frame this recently
 
 UNKNOWN = "unknown"
 
