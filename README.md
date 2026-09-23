@@ -123,7 +123,9 @@ The page has three tabs:
 
 **Live preview.** The scoreboard screen has a "Cameras" toggle at the bottom that opens a panel with a live JPEG per running camera worker. It auto-detects how many cameras are actually posting: one running camera shows one preview full-width; two show side by side; a camera that stops posting for `capture.FRAME_STALE_S` (10 s) drops out and the panel shows an inline warning naming which side is missing, instead of freezing on a stale frame. On a narrow (phone-width) screen there's room for only one preview at a time, so a switch button flips which camera is shown.
 
-The worker posts a frame at most every `--preview-every` seconds (default 0.5 s), but the whole capture loop is synchronous — a frame isn't posted until pose + face-rec inference on it finishes, so on a CPU without GPU acceleration the real cadence can be several seconds, not 0.5 s. `--no-pose` (face-rec only, no swing detection) gives a much snappier preview if that's what you're testing.
+The worker posts a frame at most every `--preview-every` seconds (default 0.5 s). A background thread grabs frames and posts the preview at the camera's own pace, so it stays live even when pose/face inference (run on the main thread from the same shared frame) can't keep up on a slow CPU — see `FrameGrabber` in `camera.py`.
+
+`--api` defaults to `http://127.0.0.1:8000`, not `http://localhost:8000` — on Windows, resolving `localhost` can add ~2 s to *every* request (it tries IPv6 first, then falls back to IPv4), which was enough to make the preview (and detections/hits generally) visibly lag. Don't change it back to `localhost` unless you've confirmed that resolves instantly on your machine.
 
 **Placeholders to tune on the real table** (all shown on `/decisions?view=rules`):
 - hit window 1.5 s

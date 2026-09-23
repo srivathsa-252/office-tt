@@ -110,6 +110,42 @@ class PoseEstimator:
         ]
 
 
+class FrameGrabber:
+    """Reads a live camera on its own thread, always exposing the newest
+    frame, and posts the live-preview JPEG right there too — so the preview
+    keeps up with the camera's own frame rate even when pose/face inference
+    (run from `latest()` on the main thread) can't keep pace on a slow CPU.
+    Not used for file replay, which stays single-threaded and timestamp-paced
+    so tuning runs stay reproducible (see CameraWorker.run)."""
+
+    def __init__(self, cap, on_frame):
+        self.cap = cap
+        self.on_frame = on_frame
+        self.stopped = False
+        self._lock = threading.Lock()
+        self._frame = None
+        self._ts: float | None = None
+
+    def start(self) -> "FrameGrabber":
+        threading.Thread(target=self._run, daemon=True).start()
+        return self
+
+    def latest(self):
+        with self._lock:
+            return self._frame, self._ts
+
+    def _run(self) -> None:
+        while True:
+            ok, frame = self.cap.read()
+            if not ok:
+                self.stopped = True
+                return
+            ts = time.time()
+            with self._lock:
+                self._frame, self._ts = frame, ts
+            self.on_frame(frame, ts)
+
+
 @dataclass
 class EnrollSession:
     request_id: int
@@ -253,6 +289,29 @@ class CameraWorker:
             {"camera": self.side, "image": base64.b64encode(buf.tobytes()).decode("ascii")},
         )
 
+    def _process_frame(self, frame, ts: float) -> None:
+        """Pose → body tracks → swing detection. The expensive step, so it
+        never gates the live preview (see FrameGrabber)."""
+        if self.pose is None:
+            return
+        bodies = self.pose.bodies(frame, ts)
+        for ev in self.tracker.update(bodies, ts, (frame.shape[1], frame.shape[0])):
+            self.api.post_async(
+                "/api/capture/hits",
+                {
+                    "camera": self.side,
+                    "player_id": ev.player_id,
+                    "ts": ev.swing.ts,
+                    "evidence": {
+                        "speed": round(ev.swing.speed, 2),
+                        "threshold": ev.swing.threshold,
+                        "wrist": ev.swing.wrist,
+                        "link": ev.link,
+                        "track": ev.track_id,
+                    },
+                },
+            )
+
     def run(self) -> None:
         import cv2
 
@@ -277,51 +336,72 @@ class CameraWorker:
         if not cap.isOpened():
             raise SystemExit(f"can't open camera/video {a.device!r}")
         is_file = isinstance(src, str) and Path(src).exists()
-        fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
-        start, n, last_face, last_preview = time.time(), 0, -1e9, -1e9
         log.info("camera %s running (%s)", self.side, a.device)
-        while True:
-            ok, frame = cap.read()
-            if not ok:
-                break
-            ts = start + n / fps if is_file else time.time()
-            n += 1
-            if is_file and a.realtime:
-                time.sleep(max(0.0, ts - time.time()))
-            if self.pose is not None:
-                bodies = self.pose.bodies(frame, ts)
-                for ev in self.tracker.update(bodies, ts, (frame.shape[1], frame.shape[0])):
-                    self.api.post_async(
-                        "/api/capture/hits",
-                        {
-                            "camera": self.side,
-                            "player_id": ev.player_id,
-                            "ts": ev.swing.ts,
-                            "evidence": {
-                                "speed": round(ev.swing.speed, 2),
-                                "threshold": ev.swing.threshold,
-                                "wrist": ev.swing.wrist,
-                                "link": ev.link,
-                                "track": ev.track_id,
-                            },
-                        },
-                    )
-            if ts - last_face >= a.face_every:
-                last_face = ts
-                self.face_check(frame, ts)
+
+        last_preview = -1e9
+
+        def maybe_preview(frame, ts: float) -> None:
+            nonlocal last_preview
             if a.preview_every > 0 and ts - last_preview >= a.preview_every:
                 last_preview = ts
                 self.preview_step(frame)
-        # Let queued posts finish when replaying a file.
-        while not self.api.q.empty():
-            time.sleep(0.05)
+
+        if is_file:
+            # Deterministic, single-threaded, paced by the file's own frame
+            # times — so a tuning run on recorded footage stays reproducible.
+            fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+            start, n, last_face = time.time(), 0, -1e9
+            while True:
+                ok, frame = cap.read()
+                if not ok:
+                    break
+                ts = start + n / fps
+                n += 1
+                if a.realtime:
+                    time.sleep(max(0.0, ts - time.time()))
+                self._process_frame(frame, ts)
+                if ts - last_face >= a.face_every:
+                    last_face = ts
+                    self.face_check(frame, ts)
+                maybe_preview(frame, ts)
+            # Let queued posts finish when replaying a file.
+            while not self.api.q.empty():
+                time.sleep(0.05)
+            return
+
+        # Live camera: a background thread grabs frames (and posts the
+        # preview) at the camera's own pace. Pose/face inference on a slow,
+        # unaccelerated CPU can take much longer than --preview-every; without
+        # this split the preview would lag several seconds behind instead of
+        # feeling live. The main thread processes whichever frame is newest,
+        # dropping ones it can't keep up with rather than queuing them.
+        grabber = FrameGrabber(cap, maybe_preview).start()
+        last_face, last_ts = -1e9, None
+        while True:
+            frame, ts = grabber.latest()
+            if frame is None or ts == last_ts:
+                if grabber.stopped:
+                    log.warning("camera %s: lost the feed", self.side)
+                    break
+                time.sleep(0.02)
+                continue
+            last_ts = ts
+            self._process_frame(frame, ts)
+            if ts - last_face >= a.face_every:
+                last_face = ts
+                self.face_check(frame, ts)
 
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     ap.add_argument("--camera", required=True, choices=["A", "B"], help="the end it's mounted at")
     ap.add_argument("--device", default="0", help="camera index, device path, URL or video file")
-    ap.add_argument("--api", default="http://localhost:8000")
+    ap.add_argument(
+        "--api",
+        default="http://127.0.0.1:8000",
+        help="not 'localhost' — on Windows, resolving it can add ~2s to every request "
+        "(IPv6-then-IPv4 fallback)",
+    )
     ap.add_argument("--models", type=Path, default=DEFAULT_DIR)
     ap.add_argument("--face-every", type=float, default=0.25, help="seconds between face checks")
     ap.add_argument(

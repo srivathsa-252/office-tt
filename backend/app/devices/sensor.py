@@ -132,7 +132,7 @@ def main() -> None:
     ap.add_argument("--baud", type=int, default=115200)
     ap.add_argument("--threshold", type=float, default=THRESHOLD)
     ap.add_argument("--noise-factor", type=float, default=NOISE_FACTOR)
-    ap.add_argument("--api", default="http://localhost:8000")
+    ap.add_argument("--api", default="http://127.0.0.1:8000")  # not "localhost": see camera.py
     ap.add_argument("--calibrate", action="store_true")
     a = ap.parse_args()
     device = int(a.device) if a.device and a.device.isdigit() else a.device

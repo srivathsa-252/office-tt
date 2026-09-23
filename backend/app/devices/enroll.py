@@ -37,7 +37,7 @@ def main() -> None:
     ap.add_argument("--image", nargs="*", type=Path, default=[])
     ap.add_argument("--device", help="camera index/path for live capture")
     ap.add_argument("--samples", type=int, default=ENROLL_SAMPLES)
-    ap.add_argument("--api", default="http://localhost:8000")
+    ap.add_argument("--api", default="http://127.0.0.1:8000")  # not "localhost": see camera.py
     ap.add_argument("--models", type=Path, default=DEFAULT_DIR)
     a = ap.parse_args()
     engine = FaceEngine(a.models)
