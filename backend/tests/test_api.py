@@ -188,6 +188,15 @@ def test_preview_frame_rejects_bad_base64(client):
     assert r.status_code == 422
 
 
+def test_stream_404s_until_a_frame_has_been_posted(client):
+    # The endpoint itself is an unbounded multipart/x-mixed-replace response —
+    # this project has no pytest-asyncio, and TestClient's synchronous
+    # transport can't cleanly drive/cancel it without risking a hung test.
+    # Its framing (verified manually against a running server) mirrors
+    # get_preview above: same hub.frames lookup, same 404-until-posted rule.
+    assert client.get("/api/capture/stream/A").status_code == 404
+
+
 def test_camera_status_reflects_which_cameras_are_posting(client):
     import base64
 

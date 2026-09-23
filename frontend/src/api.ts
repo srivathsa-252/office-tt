@@ -24,6 +24,7 @@ export const api = {
   detections: () => req<Record<SideKey, PlayerRef[]>>("GET", "/api/capture/detections"),
   cameraStatus: () => req<Record<SideKey, CameraStatus>>("GET", "/api/capture/camera-status"),
   previewUrl: (camera: SideKey) => `/api/capture/preview/${camera}`,
+  streamUrl: (camera: SideKey) => `/api/capture/stream/${camera}`,
   liveMatch: () => req<MatchState>("GET", "/api/matches/live"),
   match: (id: number) => req<MatchState>("GET", `/api/matches/${id}`),
   createMatch: (body: {

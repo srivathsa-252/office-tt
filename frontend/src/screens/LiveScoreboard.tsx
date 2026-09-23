@@ -484,12 +484,6 @@ function CameraPreviewPanel({
   onClose: () => void;
 }) {
   const [big, setBig] = useState<SideKey | null>(null);
-  const [tick, setTick] = useState(0);
-
-  useEffect(() => {
-    const t = window.setInterval(() => setTick((v) => v + 1), 600);
-    return () => window.clearInterval(t);
-  }, []);
 
   const active = CAMERA_SIDES.filter((s) => status?.[s]?.active);
   const missing = CAMERA_SIDES.filter((s) => !status?.[s]?.active);
@@ -573,7 +567,7 @@ function CameraPreviewPanel({
 
       <div style={{ flexGrow: 1, display: "flex", gap: 16, marginTop: 16, minHeight: 0 }}>
         {feeds.length > 0 ? (
-          feeds.map((side) => <CameraFeed key={side} side={side} tick={tick} />)
+          feeds.map((side) => <CameraFeed key={side} side={side} />)
         ) : (
           <div
             style={{
@@ -619,7 +613,7 @@ function CameraPreviewPanel({
   );
 }
 
-function CameraFeed({ side, tick }: { side: SideKey; tick: number }) {
+function CameraFeed({ side }: { side: SideKey }) {
   const [ok, setOk] = useState(true);
   return (
     <div
@@ -648,7 +642,7 @@ function CameraFeed({ side, tick }: { side: SideKey; tick: number }) {
       </div>
       <div style={{ flexGrow: 1, position: "relative", background: "#000" }}>
         <img
-          src={`${api.previewUrl(side)}?t=${tick}`}
+          src={api.streamUrl(side)}
           alt={`Live preview from camera ${side}`}
           onLoad={() => setOk(true)}
           onError={() => setOk(false)}

@@ -11,8 +11,8 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Literal
 
-from fastapi import Depends, FastAPI, HTTPException, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, Response
+from fastapi import Depends, FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from sqlalchemy import select
@@ -343,6 +343,35 @@ def create_app(session_factory: sessionmaker | None = None, init: bool = True) -
             raise HTTPException(404, "no preview frame yet")
         jpeg, _ts = frame
         return Response(content=jpeg, media_type="image/jpeg")
+
+    @app.get("/api/capture/stream/{camera}")
+    async def stream_preview(camera: Side, request: Request):
+        # MJPEG: one held-open connection, each new frame pushed as it lands.
+        # An <img> renders it continuously — no client polling, no "refresh
+        # every N ms" ceiling on how live it can look. Exactly what the
+        # worker's latest POST /api/capture/frames put in the hub; a stalled
+        # camera just freezes here (camera-status is what flags that).
+        if camera not in hub.frames:
+            raise HTTPException(404, "no preview frame yet")
+
+        async def frames():
+            sent: bytes | None = None
+            while True:
+                if await request.is_disconnected():
+                    return
+                current = hub.frames.get(camera)
+                if current is not None and current[0] != sent:
+                    sent = current[0]
+                    yield (
+                        b"--frame\r\nContent-Type: image/jpeg\r\nContent-Length: "
+                        + str(len(sent)).encode()
+                        + b"\r\n\r\n"
+                        + sent
+                        + b"\r\n"
+                    )
+                await asyncio.sleep(0.05)
+
+        return StreamingResponse(frames(), media_type="multipart/x-mixed-replace; boundary=frame")
 
     @app.get("/api/capture/camera-status")
     def get_camera_status():

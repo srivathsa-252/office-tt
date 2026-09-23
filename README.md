@@ -114,16 +114,17 @@ The page has three tabs:
 | `POST /api/capture/hits` | `{camera, player_id?, ts?, evidence?}` | One swing. |
 | `POST /api/capture/device-params` | `{device, params}` | Thresholds a worker runs with (shown on `/decisions`). |
 | `POST /api/capture/frames` | `{camera, image, ts?}` | A downscaled JPEG (base64) for the live-preview panel. |
-| `GET /api/capture/preview/{camera}` | | The latest JPEG posted for that camera, or 404 if none yet. |
+| `GET /api/capture/preview/{camera}` | | The latest JPEG posted for that camera as a single image, or 404 if none yet. |
+| `GET /api/capture/stream/{camera}` | | The same frames as a live `multipart/x-mixed-replace` MJPEG stream — what the scoreboard's preview panel actually points an `<img>` at. |
 | `GET /api/capture/camera-status` | | `{A, B}` → `{active, last_seen}`, from how recently each posted a preview frame. |
 | `GET /api/face-gallery` · `POST/DELETE /api/players/{id}/faces` | `{vectors, source, request_id?}` | The face gallery. |
 | `POST/GET /api/capture/enroll-requests` · `…/{id}/failed` | | Asks a camera to learn a face. |
 
 `ts` is epoch seconds from the shared clock. When it's omitted, the server's time is used.
 
-**Live preview.** The scoreboard screen has a "Cameras" toggle at the bottom that opens a panel with a live JPEG per running camera worker. It auto-detects how many cameras are actually posting: one running camera shows one preview full-width; two show side by side; a camera that stops posting for `capture.FRAME_STALE_S` (10 s) drops out and the panel shows an inline warning naming which side is missing, instead of freezing on a stale frame. On a narrow (phone-width) screen there's room for only one preview at a time, so a switch button flips which camera is shown.
+**Live preview.** The scoreboard screen has a "Cameras" toggle at the bottom that opens a panel showing a genuinely live feed per running camera worker — the panel's `<img>` points straight at `GET /api/capture/stream/{camera}`, an MJPEG stream held open over one connection, so the browser renders each new frame as it arrives with no polling and no "refresh every N ms" ceiling on how live it looks. (`GET /api/capture/preview/{camera}` still exists as a single-JPEG fetch, e.g. for a one-off snapshot.) The panel auto-detects how many cameras are actually posting: one running camera shows one preview full-width; two show side by side; a camera that stops posting for `capture.FRAME_STALE_S` (10 s) drops out and the panel shows an inline warning naming which side is missing, instead of freezing on a stale frame. On a narrow (phone-width) screen there's room for only one preview at a time, so a switch button flips which camera is shown.
 
-The worker posts a frame at most every `--preview-every` seconds (default 0.5 s). A background thread grabs frames and posts the preview at the camera's own pace, so it stays live even when pose/face inference (run on the main thread from the same shared frame) can't keep up on a slow CPU — see `FrameGrabber` in `camera.py`.
+The worker posts a frame at most every `--preview-every` seconds (default 0.15 s, ~6-7 fps). A background thread grabs frames and posts the preview at the camera's own pace, so it stays live even when pose/face inference (run on the main thread from the same shared frame) can't keep up on a slow CPU — see `FrameGrabber` in `camera.py`.
 
 `--api` defaults to `http://127.0.0.1:8000`, not `http://localhost:8000` — on Windows, resolving `localhost` can add ~2 s to *every* request (it tries IPv6 first, then falls back to IPv4), which was enough to make the preview (and detections/hits generally) visibly lag. Don't change it back to `localhost` unless you've confirmed that resolves instantly on your machine.
 

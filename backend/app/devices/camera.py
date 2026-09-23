@@ -407,7 +407,7 @@ def main() -> None:
     ap.add_argument(
         "--preview-every",
         type=float,
-        default=0.5,
+        default=0.15,
         help="seconds between live-preview frames (0 disables the preview)",
     )
     ap.add_argument("--match-threshold", type=float, default=MATCH_THRESHOLD)
