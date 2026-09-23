@@ -80,6 +80,29 @@ def test_match_close_rates_players_and_undo_reverts(client):
     assert stats["rating"] == 1500 and stats["matches_played"] == 0
 
 
+def test_stats_history_is_not_capped_and_carries_rating_after(client):
+    pr, sr = add_players(client, "Praneeth", "Sri")
+    n = 15  # more than the old 10-match history cap
+    for _ in range(n):
+        m = singles(client, pr, sr)
+        win(client, m["id"], "A", MERCY_SHUTOUT_AT)
+    stats = client.get(f"/api/players/{pr}/stats").json()
+    assert len(stats["history"]) == n
+    assert all(h["rating_after"] is not None for h in stats["history"])
+    assert stats["history"][0]["rating_after"] == pytest.approx(stats["rating"])
+
+
+def test_stats_style_tags_detail_covers_every_tag(client):
+    pr, sr = add_players(client, "Praneeth", "Sri")
+    m = singles(client, pr, sr)
+    win(client, m["id"], "A", MERCY_SHUTOUT_AT)
+    stats = client.get(f"/api/players/{pr}/stats").json()
+    tags = {d["tag"] for d in stats["style_tags_detail"]}
+    assert tags == {"aggressive", "defensive", "consistent", "server-reliant"}
+    assert all(not d["applies"] for d in stats["style_tags_detail"])  # too few points
+    assert all("reason" in d for d in stats["style_tags_detail"])
+
+
 def win_rejected(client, mid):
     return client.post(f"/api/matches/{mid}/points", json={"winner": "A"}).status_code == 409
 

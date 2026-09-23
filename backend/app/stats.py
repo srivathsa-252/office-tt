@@ -10,7 +10,6 @@ from .models import Match, Pair, Player, Point, RatingHistory
 from .service import player_ref
 
 RECENT_FORM = 5
-HISTORY_LIMIT = 10
 
 # Style-tag thresholds — placeholders until there's real office data.
 STYLE_MIN_POINTS = 20
@@ -181,8 +180,17 @@ def player_stats(db: Session, player: Player) -> dict:
             names[pid] = db.get(Player, pid)
         return player_ref(names[pid])
 
+    # Individual rating only moves on singles matches (doubles rates the pair —
+    # see pair_synergy above), so this is None for a doubles-only history row.
+    rating_after_by_match = {
+        r.match_id: r.rating_after
+        for r in db.scalars(
+            select(RatingHistory).where(RatingHistory.player_id == player.id)
+        ).all()
+    }
+
     history = []
-    for m in matches[:HISTORY_LIMIT]:
+    for m in matches:  # every finished match this player was in — not capped
         mine = _side_of(m, player.id)
         theirs = "B" if mine == "A" else "A"
         opponents = m.side_b_players if mine == "A" else m.side_a_players
@@ -199,6 +207,7 @@ def player_stats(db: Session, player: Player) -> dict:
                     "own": sum(g[mine] > g[theirs] for g in games),
                     "opp": sum(g[theirs] > g[mine] for g in games),
                 },
+                "rating_after": rating_after_by_match.get(m.id),
             }
         )
 
@@ -216,6 +225,10 @@ def player_stats(db: Session, player: Player) -> dict:
         "serve_win_rate": _ratio(sum(p.winner == s for p, s in serving), len(serving)),
         "recent_form": ["W" if w else "L" for w in wins[:RECENT_FORM]],
         "style_tags": style_tags(pts, player.id),
+        # The same evaluation with its reasoning, e.g. for /players/{id} to show
+        # every tag (met or not) with the numbers behind it, not just the ones
+        # that currently apply.
+        "style_tags_detail": evaluate_style(pts, player.id),
         "synergy": synergy,
         "history": history,
     }

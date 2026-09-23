@@ -71,6 +71,15 @@ export interface HistoryRow {
   closed_at: string;
   games: { own: number; opp: number }[];
   games_won: { own: number; opp: number };
+  // Individual rating only moves on singles matches (doubles rates the pair),
+  // so this is null for a doubles-only history row.
+  rating_after: number | null;
+}
+
+export interface StyleTagDetail {
+  tag: string;
+  applies: boolean;
+  reason: string;
 }
 
 export interface PlayerStats {
@@ -84,6 +93,7 @@ export interface PlayerStats {
   serve_win_rate: number | null;
   recent_form: ("W" | "L")[];
   style_tags: string[];
+  style_tags_detail: StyleTagDetail[];
   synergy: Synergy[];
   history: HistoryRow[];
 }
