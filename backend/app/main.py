@@ -6,9 +6,12 @@ import asyncio
 import os
 from collections import defaultdict
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Literal
 
 from fastapi import Depends, FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
@@ -34,6 +37,12 @@ from .stats import player_stats
 # Whether tapping the chess-clock bar opens the Confirm-point screen to
 # capture win_type (spec §3: optional). Off = one tap scores immediately.
 CAPTURE_WIN_TYPE = os.environ.get("TT_CAPTURE_WIN_TYPE", "1") != "0"
+
+# The built frontend (`npm run build`). When present, the API serves it too, so the
+# whole app is one origin on one port — no Vite dev server needed in production.
+STATIC_DIR = Path(
+    os.environ.get("TT_STATIC_DIR", Path(__file__).resolve().parents[2] / "frontend" / "dist")
+)
 
 
 # -- request bodies ----------------------------------------------------------
@@ -395,7 +404,23 @@ def create_app(session_factory: sessionmaker | None = None, init: bool = True) -
         db.commit()
 
     register_decisions_page(app, get_db)
+    if (STATIC_DIR / "index.html").exists():
+        mount_frontend(app, STATIC_DIR)
     return app
+
+
+def mount_frontend(app: FastAPI, dist: Path) -> None:
+    app.mount("/assets", StaticFiles(directory=dist / "assets"), name="assets")
+
+    # Client-side routes (/setup, /live/3, /players/1) all load the SPA shell.
+    @app.get("/{path:path}", include_in_schema=False)
+    def spa(path: str):
+        if path.startswith(("api/", "ws/")):
+            raise HTTPException(404)
+        file = (dist / path).resolve()
+        if path and file.is_file() and file.is_relative_to(dist.resolve()):
+            return FileResponse(file)
+        return FileResponse(dist / "index.html")
 
 
 app = create_app()

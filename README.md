@@ -29,6 +29,8 @@ cd frontend
 npm install && npm run dev
 ```
 
+For a single-port setup, run `npm run build` in `frontend/`: the API then serves the app itself at `http://<host>:8000/` (override the folder with `TT_STATIC_DIR`).
+
 Open `http://<host>:5173/` on the table screen. It resumes the live match if there is one. Otherwise it opens match setup. **`http://<host>:5173/decisions`** (or `:8000/decisions`) explains everything the system decides.
 
 - `DATABASE_URL` defaults to `postgresql+psycopg://tt:tt@localhost:5432/office_tt`. Tables are created on startup. There are no migrations yet.
