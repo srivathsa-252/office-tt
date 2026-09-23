@@ -40,6 +40,28 @@ export function LiveScoreboard() {
     }
   }, []);
 
+  const rematch = useCallback(async () => {
+    if (!m) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const sideA = m.sides.A.players.map((p) => p.id);
+      const sideB = m.sides.B.players.map((p) => p.id);
+      const nm = await api.createMatch({
+        mode: m.mode,
+        side_a: sideA,
+        side_b: sideB,
+        first_server: sideA[0],
+        first_receiver: sideB[0],
+        format: m.format,
+      });
+      navigate(`/live/${nm.id}`);
+    } catch (e) {
+      setError((e as Error).message);
+      setBusy(false);
+    }
+  }, [m, navigate]);
+
   const score = (side: SideKey, winType: WinType | null) => {
     setTag(null);
     run(() => api.scorePoint(matchId, side, winType));
@@ -92,6 +114,7 @@ export function LiveScoreboard() {
           display: "flex",
           flexDirection: "column",
           overflow: "hidden",
+          position: "relative",
         }}
       >
         <div
@@ -128,7 +151,7 @@ export function LiveScoreboard() {
               <UndoButton disabled={busy} onClick={undo} />
             )}
             {live && m.deuce && <Pill>DEUCE</Pill>}
-            {!live && (
+            {m.status === "abandoned" && (
               <Link to="/setup" style={{ textDecoration: "none" }}>
                 <Pill>NEW MATCH</Pill>
               </Link>
@@ -165,6 +188,8 @@ export function LiveScoreboard() {
           <BarZone m={m} side="A" onTap={tap} disabled={busy} />
           <BarZone m={m} side="B" onTap={tap} disabled={busy} />
         </div>
+
+        {m.status === "finished" && <MatchEndOverlay m={m} busy={busy} onRematch={rematch} />}
       </div>
     </Stage>
   );
@@ -225,6 +250,104 @@ function UndoButton({ onClick, disabled }: { onClick: () => void; disabled: bool
         </div>
       </div>
     </button>
+  );
+}
+
+function MatchEndOverlay({
+  m,
+  busy,
+  onRematch,
+}: {
+  m: MatchState;
+  busy: boolean;
+  onRematch: () => void;
+}) {
+  const winnerSide = m.winner as SideKey;
+  const loserSide: SideKey = winnerSide === "A" ? "B" : "A";
+  const winners = teamName(m.sides[winnerSide].players);
+  const losers = teamName(m.sides[loserSide].players);
+
+  return (
+    <div
+      style={{
+        position: "absolute",
+        inset: 0,
+        background: "rgba(11,13,16,0.94)",
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: 16,
+        textAlign: "center",
+        padding: 40,
+      }}
+    >
+      <div
+        className="mono"
+        style={{
+          fontSize: 12,
+          letterSpacing: 2,
+          color: SIDE[winnerSide].color,
+          fontWeight: 800,
+          textTransform: "uppercase",
+        }}
+      >
+        Match over
+      </div>
+      <h1 style={{ margin: 0, fontSize: 46, fontWeight: 800 }}>Congratulations!</h1>
+      <div style={{ fontSize: 18, color: C.textSoft, fontWeight: 700 }}>
+        {winners} beat {losers}, {m.games[winnerSide]}&ndash;{m.games[loserSide]}
+      </div>
+
+      <div style={{ display: "flex", gap: 14, marginTop: 12 }}>
+        <button
+          onClick={onRematch}
+          disabled={busy}
+          style={{
+            padding: "14px 32px",
+            border: "none",
+            borderRadius: 14,
+            background: C.lime,
+            color: C.bg,
+            fontSize: 15,
+            fontWeight: 800,
+            letterSpacing: 0.3,
+            opacity: busy ? 0.6 : 1,
+          }}
+        >
+          Rematch
+        </button>
+        <Link to="/setup" style={{ textDecoration: "none" }}>
+          <div
+            style={{
+              padding: "14px 32px",
+              border: `1.5px solid ${C.border}`,
+              borderRadius: 14,
+              color: C.text,
+              fontSize: 15,
+              fontWeight: 800,
+              letterSpacing: 0.3,
+            }}
+          >
+            New Match
+          </div>
+        </Link>
+      </div>
+
+      <div style={{ display: "flex", gap: 20, marginTop: 10 }}>
+        {(["A", "B"] as const).flatMap((side) =>
+          m.sides[side].players.map((p) => (
+            <Link
+              key={p.id}
+              to={`/players/${p.id}`}
+              style={{ fontSize: 12, color: C.faint, fontWeight: 600, textDecoration: "underline" }}
+            >
+              {p.name} stats
+            </Link>
+          )),
+        )}
+      </div>
+    </div>
   );
 }
 

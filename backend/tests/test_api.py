@@ -3,6 +3,7 @@ from sqlalchemy import select
 
 from app.capture import hub
 from app.models import Point
+from app.rules import MERCY_SHUTOUT_AT
 
 
 def add_players(client, *names):
@@ -64,17 +65,17 @@ def test_undo_restores_previous_state(client):
 def test_match_close_rates_players_and_undo_reverts(client):
     pr, sr = add_players(client, "Praneeth", "Sri")
     m = singles(client, pr, sr)
-    s = win(client, m["id"], "A", 21)
+    s = win(client, m["id"], "A", MERCY_SHUTOUT_AT)  # shutout: closes the match early
     assert s["status"] == "finished" and s["winner"] == "A"
     assert win_rejected(client, m["id"])
     stats = client.get(f"/api/players/{pr}/stats").json()
     assert stats["rating"] > 1500 and stats["rating_delta"] > 0
     assert stats["win_rate"] == 1 and stats["recent_form"] == ["W"]
     assert stats["serve_win_rate"] == 1
-    assert stats["history"][0]["games"] == [{"own": 21, "opp": 0}]
+    assert stats["history"][0]["games"] == [{"own": MERCY_SHUTOUT_AT, "opp": 0}]
 
     s = client.delete(f"/api/matches/{m['id']}/points/last").json()
-    assert s["status"] == "live" and s["score"] == {"A": 20, "B": 0}
+    assert s["status"] == "live" and s["score"] == {"A": MERCY_SHUTOUT_AT - 1, "B": 0}
     stats = client.get(f"/api/players/{pr}/stats").json()
     assert stats["rating"] == 1500 and stats["matches_played"] == 0
 
@@ -86,7 +87,7 @@ def win_rejected(client, mid):
 def test_new_match_abandons_live_one_and_it_is_not_rated(client):
     pr, sr = add_players(client, "Praneeth", "Sri")
     m1 = singles(client, pr, sr)
-    win(client, m1["id"], "A", 10)
+    win(client, m1["id"], "A", MERCY_SHUTOUT_AT - 1)  # stay short of the shutout close
     m2 = singles(client, pr, sr)
     assert client.get(f"/api/matches/{m1['id']}").json()["status"] == "abandoned"
     assert client.get("/api/matches/live").json()["id"] == m2["id"]
@@ -109,7 +110,7 @@ def test_doubles_rates_pairs_and_reports_synergy(client):
     m = r.json()
     s = win(client, m["id"], "A", 5)
     assert (s["server"]["id"], s["receiver"]["id"]) == (sr, pr)
-    win(client, m["id"], "A", 16)
+    win(client, m["id"], "A", MERCY_SHUTOUT_AT - 5)  # shutout closes the match early
     stats = client.get(f"/api/players/{pr}/stats").json()
     assert stats["rating"] == 1500  # doubles rates the pair, not the individual
     syn = stats["synergy"][0]

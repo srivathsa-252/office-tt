@@ -129,18 +129,24 @@ def test_enroll_failure_is_logged(client):
 def test_decisions_page_renders_all_views(client):
     pr, sr = add_players(client, "Praneeth", "Sri")
     m = singles(client, pr, sr)
-    win(client, m["id"], "A", 21)
+    # Interleaved so neither side is shut out at 0 — style tags need >= 20 points played.
+    for _ in range(19):
+        win(client, m["id"], "A")
+        win(client, m["id"], "B")
+    win(client, m["id"], "A")
+    win(client, m["id"], "A")  # 21-19: game and match won
+    total_points = 19 * 2 + 2
     client.post(
         "/api/capture/device-params", json={"device": "sensor", "params": {"threshold": 0.08}}
     )
     page = client.get("/decisions").text
     assert "Decision log" in page and "Praneeth keeps serve" in page and "Evidence" in page
     match_page = client.get(f"/decisions?match={m['id']}").text
-    assert "Point 21" in match_page and "Rating" in match_page
+    assert f"Point {total_points}" in match_page and "Rating" in match_page
     rules = client.get("/decisions?view=rules").text
     assert "0.363" in rules and "A1→B1, B1→A1, A2→B2, B2→A2" in rules
     assert "running with" in rules and "threshold</b> 0.08" in rules
     players = client.get("/decisions?view=players").text
     assert "server-reliant" in players and "tags need at least 20" not in players
-    assert client.get("/decisions?kind=serve").text.count('class="badge') == 21
+    assert client.get("/decisions?kind=serve").text.count('class="badge') == total_points
     assert client.get("/decisions?view=nope").status_code == 422

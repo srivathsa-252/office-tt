@@ -9,6 +9,11 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum
 
+# Not in the spec: a shutout mercy rule, confirmed for the office. A game
+# also ends here if one side is still at 0 once the other reaches this many
+# points, instead of running all the way to points_to_win.
+MERCY_SHUTOUT_AT = 8
+
 
 class Side(str, Enum):
     A = "A"
@@ -186,6 +191,10 @@ class MatchEngine:
         a, b = self.score[Side.A], self.score[Side.B]
         if max(a, b) >= self.fmt.points_to_win and abs(a - b) >= self.fmt.win_margin:
             return Side.A if a > b else Side.B
+        if a == 0 and b >= MERCY_SHUTOUT_AT:
+            return Side.B
+        if b == 0 and a >= MERCY_SHUTOUT_AT:
+            return Side.A
         return None
 
     def _start_next_game(self) -> None:

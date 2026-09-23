@@ -20,7 +20,7 @@ from .devices import faces as face_cfg
 from .devices import sensor as sensor_cfg
 from .devices import swing as swing_cfg
 from .models import Decision, FaceEmbedding, Match, Player, Point
-from .rules import Format
+from .rules import MERCY_SHUTOUT_AT, Format
 
 templates = Jinja2Templates(directory=Path(__file__).parent / "templates")
 
@@ -70,6 +70,12 @@ def rules_in_force() -> list[dict]:
             "rules": [
                 ("Points to win a game", f.points_to_win, "First to this many…"),
                 ("Win margin", f.win_margin, "…with at least this lead, so 21–20 plays on."),
+                (
+                    "Mercy shutout",
+                    f"0–{MERCY_SHUTOUT_AT}",
+                    "Not in the spec, confirmed for the office: a game also ends here if one "
+                    "side is still at 0 once the other reaches this many points.",
+                ),
                 ("Serves per turn", f.serves_per_turn, "Serve passes after this many points."),
                 (
                     "Deuce",

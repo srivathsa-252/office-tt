@@ -1,6 +1,6 @@
 import pytest
 
-from app.rules import Format, MatchEngine, Mode, Side
+from app.rules import MERCY_SHUTOUT_AT, Format, MatchEngine, Mode, Side
 
 A, B = Side.A, Side.B
 ONE_GAME = Format(best_of=1)
@@ -38,9 +38,8 @@ def test_doubles_confirmed_rotation_loops():
 
 def test_game_to_21_needs_two_clear():
     e = singles()
-    for _ in range(20):
+    for _ in range(20):  # interleaved so neither side is shut out at 0
         e.point_won(A)
-    for _ in range(20):
         e.point_won(B)
     assert e.is_deuce and e.match_winner is None
     e.point_won(A)  # 21-20: not over
@@ -56,7 +55,6 @@ def test_deuce_rotates_serve_every_point():
     e = singles()
     for _ in range(20):
         e.point_won(A)
-    for _ in range(20):
         e.point_won(B)
     assert e.serves_in_turn == 1
     s = e.server
@@ -66,34 +64,53 @@ def test_deuce_rotates_serve_every_point():
     assert e.server == s
 
 
-def test_straight_win_21_0():
+def test_mercy_shutout_ends_the_game_early():
     e = singles()
-    for _ in range(20):
+    for _ in range(MERCY_SHUTOUT_AT - 1):
         e.point_won(A)
-    r = e.point_won(A)
-    assert r.match_winner is A and r.score_after == {A: 21, B: 0}
+    r = e.point_won(A)  # 8-0: shutout, game (and this one-game match) ends here
+    assert r.game_winner is A and r.match_winner is A
+    assert r.score_after == {A: MERCY_SHUTOUT_AT, B: 0}
     with pytest.raises(ValueError):
         e.point_won(B)
 
 
+def test_mercy_shutout_only_ends_the_game_in_a_best_of():
+    e = singles(Format(best_of=3))
+    for _ in range(MERCY_SHUTOUT_AT):
+        e.point_won(A)
+    assert e.games == {A: 1, B: 0}
+    assert e.match_winner is None  # match plays on to game 2
+    assert e.score == {A: 0, B: 0} and e.game_number == 2
+
+
+def test_win_needs_two_clear_once_past_the_mercy_score():
+    e = singles()
+    for _ in range(MERCY_SHUTOUT_AT):
+        e.point_won(A)
+        e.point_won(B)
+    assert e.score == {A: MERCY_SHUTOUT_AT, B: MERCY_SHUTOUT_AT}
+    assert e.match_winner is None  # both sides scored, so no shutout
+
+
 def test_best_of_three_resets_score_and_alternates_first_serve():
     e = singles(Format(best_of=3))
-    for _ in range(21):
+    for _ in range(MERCY_SHUTOUT_AT):
         e.point_won(A)
     assert e.games == {A: 1, B: 0}
     assert e.score == {A: 0, B: 0} and e.game_number == 2
     assert e.server == 2  # side B serves first in game 2
-    for _ in range(21):
+    for _ in range(MERCY_SHUTOUT_AT):
         e.point_won(B)
     assert e.game_number == 3 and e.server == 1
-    for _ in range(21):
+    for _ in range(MERCY_SHUTOUT_AT):
         e.point_won(A)
-    assert e.match_winner is A and e.game_scores[-1] == {A: 21, B: 0}
+    assert e.match_winner is A and e.game_scores[-1] == {A: MERCY_SHUTOUT_AT, B: 0}
 
 
 def test_doubles_next_game_starts_next_turn_in_rotation():
     e = doubles(Format(best_of=3))
-    for _ in range(21):
+    for _ in range(MERCY_SHUTOUT_AT):
         e.point_won(A)
     assert (e.server, e.receiver) == (3, 1)
 

@@ -7,7 +7,7 @@ from sqlalchemy.orm import Session
 
 from .capture import RallyCapture
 from .models import Decision
-from .rules import MatchEngine, PointResult, Side
+from .rules import MERCY_SHUTOUT_AT, MatchEngine, PointResult, Side
 
 # kind -> (label, what this kind of decision is)
 KINDS: dict[str, tuple[str, str]] = {
@@ -15,8 +15,11 @@ KINDS: dict[str, tuple[str, str]] = {
     "match.abandoned": ("Abandoned", "A live match replaced by a new one; never rated."),
     "point.scored": ("Point", "The one human input in v1: who won the point (and how)."),
     "serve": ("Serve", "Who serves next, from the 5-serve turn, deuce, and rotation rules."),
-    "game.check": ("Game rule", "Whether the game is over: 21 points with a 2-point lead."),
-    "game.won": ("Game won", "A side reached 21 with a 2-point lead."),
+    "game.check": (
+        "Game rule",
+        "Whether the game is over: 21 points with a 2-point lead, or a 0–8 mercy shutout.",
+    ),
+    "game.won": ("Game won", "A side reached 21 with a 2-point lead, or shut the other out 0–8."),
     "match.won": ("Match won", "A side won enough games; the match closes and is rated."),
     "rally": ("Rally", "No sensor data: rally length and last hitter both left unknown."),
     "rally.length": ("Rally length", "Table-sensor contacts counted during the rally."),
@@ -105,6 +108,14 @@ def explain_game(engine: MatchEngine, r: PointResult) -> tuple[str, str, dict] |
     need, margin = engine.fmt.points_to_win, engine.fmt.win_margin
     detail = {"score": f"{a}–{b}", "points_to_win": need, "win_margin": margin}
     if r.game_winner is not None:
+        if min(a, b) == 0 and max(a, b) < need:
+            detail["mercy_shutout_at"] = MERCY_SHUTOUT_AT
+            return (
+                "game.won",
+                f"Side {r.game_winner.value} wins game {r.game_number} {a}–{b}: a mercy "
+                f"shutout at 0–{MERCY_SHUTOUT_AT}, before reaching {need}.",
+                detail,
+            )
         lead = abs(a - b)
         return (
             "game.won",
