@@ -1,0 +1,300 @@
+import { useCallback, useEffect, useState } from "react";
+import { Link, useNavigate, useParams } from "react-router-dom";
+import { api, subscribeMatch } from "../api";
+import { Avatar, AvatarPair } from "../components/Avatar";
+import { Stage } from "../components/Stage";
+import { C, SIDE, type SideKey } from "../theme";
+import { activePlayer, partnerOf, teamName } from "../match";
+import type { MatchState, WinType } from "../types";
+import { PointConfirm } from "./PointConfirm";
+
+export function LiveScoreboard() {
+  const matchId = Number(useParams().matchId);
+  const navigate = useNavigate();
+  const [m, setM] = useState<MatchState | null>(null);
+  const [captureWinType, setCaptureWinType] = useState(false);
+  const [confirmFor, setConfirmFor] = useState<SideKey | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    api.config().then((c) => setCaptureWinType(c.capture_win_type));
+    return subscribeMatch(matchId, setM);
+  }, [matchId]);
+
+  const run = useCallback(async (fn: () => Promise<MatchState>) => {
+    setBusy(true);
+    setError(null);
+    try {
+      setM(await fn());
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  }, []);
+
+  const score = (side: SideKey, winType: WinType | null) => {
+    setConfirmFor(null);
+    run(() => api.scorePoint(matchId, side, winType));
+  };
+
+  // Undo has no control in the design; Backspace / Ctrl+Z on an attached keyboard.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Backspace" || (e.key === "z" && (e.ctrlKey || e.metaKey))) {
+        e.preventDefault();
+        setConfirmFor(null);
+        run(() => api.undo(matchId));
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [matchId, run]);
+
+  if (!m) return <Stage width={1280} height={720} background={C.bgScoreboard}>{null}</Stage>;
+
+  if (confirmFor && m.status === "live") {
+    return (
+      <PointConfirm
+        match={m}
+        preselected={confirmFor}
+        onConfirm={score}
+        onCancel={() => setConfirmFor(null)}
+      />
+    );
+  }
+
+  const live = m.status === "live";
+  const tap = (side: SideKey) => {
+    if (busy) return;
+    if (!live) {
+      navigate(`/players/${activePlayer(m, side).id}`);
+    } else if (captureWinType) {
+      setConfirmFor(side);
+    } else {
+      score(side, null);
+    }
+  };
+
+  const header = live
+    ? `LIVE · GAME ${m.game_number} OF ${m.format.best_of}`
+    : m.status === "finished"
+      ? `FINAL · SIDE ${m.winner} WINS`
+      : "ABANDONED";
+
+  return (
+    <Stage width={1280} height={720} background={C.bgScoreboard}>
+      <div
+        style={{
+          width: 1280,
+          height: 720,
+          boxSizing: "border-box",
+          background: C.bgScoreboard,
+          color: C.text,
+          display: "flex",
+          flexDirection: "column",
+          overflow: "hidden",
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            padding: "18px 40px 0",
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+            <div
+              style={{
+                width: 9,
+                height: 9,
+                borderRadius: "50%",
+                background: live ? C.live : C.faint,
+              }}
+            />
+            <div
+              className="mono"
+              style={{ fontSize: 12, letterSpacing: 2, color: C.muted, fontWeight: 700 }}
+            >
+              {header}
+            </div>
+            {error && (
+              <div className="mono" style={{ fontSize: 12, color: C.coral, fontWeight: 700 }}>
+                {error}
+              </div>
+            )}
+          </div>
+          {live && m.deuce && <Pill>DEUCE</Pill>}
+          {!live && (
+            <Link to="/setup" style={{ textDecoration: "none" }}>
+              <Pill>NEW MATCH</Pill>
+            </Link>
+          )}
+        </div>
+
+        <div
+          style={{
+            flexGrow: 1,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 48,
+            padding: "4px 48px",
+            minHeight: 0,
+          }}
+        >
+          <SideScore m={m} side="A" />
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 6 }}>
+            <div className="digits" style={{ fontSize: 22, color: C.borderDashed }}>
+              GAMES
+            </div>
+            <div className="digits" style={{ fontSize: 34, color: C.text, letterSpacing: 1 }}>
+              {m.games.A}&ndash;{m.games.B}
+            </div>
+          </div>
+          <SideScore m={m} side="B" />
+        </div>
+
+        <div style={{ display: "flex", height: 226, borderTop: `1px solid ${C.surface}` }}>
+          <BarZone m={m} side="A" onTap={tap} disabled={busy} />
+          <BarZone m={m} side="B" onTap={tap} disabled={busy} />
+        </div>
+      </div>
+    </Stage>
+  );
+}
+
+function Pill({ children }: { children: string }) {
+  return (
+    <div
+      style={{
+        padding: "6px 16px",
+        background: "rgba(200,255,77,0.12)",
+        border: "1px solid rgba(200,255,77,0.4)",
+        borderRadius: 999,
+      }}
+    >
+      <div
+        className="mono"
+        style={{ fontSize: 11, letterSpacing: 1.5, color: C.lime, fontWeight: 700 }}
+      >
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function SideScore({ m, side }: { m: MatchState; side: SideKey }) {
+  const { color } = SIDE[side];
+  const player = activePlayer(m, side);
+  const serving = m.server.side === side;
+  const filled = serving && m.status === "live" ? m.serves_remaining : 0;
+  return (
+    <div
+      style={{
+        flex: 1,
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        gap: 10,
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+        <Avatar player={player} size={28} fontSize={11} background={color} color={C.bgScoreboard} />
+        <div style={{ textAlign: "left" }}>
+          <div style={{ fontSize: 15, fontWeight: 800 }}>{player.name}</div>
+          <div style={{ fontSize: 10, color: C.subtle, fontWeight: 600 }}>Side {side}</div>
+        </div>
+        {serving && m.status === "live" && (
+          <svg
+            width={14}
+            height={14}
+            viewBox="0 0 24 24"
+            fill={C.lime}
+            style={{ marginLeft: 2 }}
+            aria-label="Serving"
+          >
+            <circle cx={12} cy={12} r={6} />
+          </svg>
+        )}
+      </div>
+      <div className="digits" style={{ fontSize: 140, lineHeight: 1, color, letterSpacing: 2 }}>
+        {m.score[side]}
+      </div>
+      <div style={{ display: "flex", gap: 5 }} aria-label={serving ? `${filled} serves left` : undefined}>
+        {Array.from({ length: m.serves_in_turn }, (_, i) => (
+          <div
+            key={i}
+            style={{
+              width: 8,
+              height: 8,
+              borderRadius: "50%",
+              background: i < filled ? color : C.border,
+            }}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function BarZone({
+  m,
+  side,
+  onTap,
+  disabled,
+}: {
+  m: MatchState;
+  side: SideKey;
+  onTap: (s: SideKey) => void;
+  disabled: boolean;
+}) {
+  const s = SIDE[side];
+  const lead = activePlayer(m, side);
+  const partner = partnerOf(m, side, lead);
+  const names = teamName([lead, partner]);
+  const live = m.status === "live";
+  const hit = m.last_hit[side]?.player?.name ?? "unknown";
+  return (
+    <button
+      aria-label={live ? `Point to ${names}` : `Stats for ${lead.name}`}
+      onClick={() => onTap(side)}
+      disabled={disabled || m.status === "abandoned"}
+      style={{
+        flex: 1,
+        border: "none",
+        borderRight: side === "A" ? `2px solid ${C.bgScoreboard}` : "none",
+        background: s.barBg,
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: 8,
+        cursor: "pointer",
+      }}
+    >
+      <AvatarPair
+        lead={lead}
+        partner={partner}
+        size={40}
+        fontSize={14}
+        overlap={12}
+        color={s.color}
+        leadText={C.bgScoreboard}
+        partnerFill={s.barPartner}
+        ring={s.barBg}
+      />
+      <div
+        className="mono"
+        style={{ fontSize: 13, letterSpacing: 2, color: s.color, fontWeight: 800 }}
+      >
+        {live ? `POINT · SIDE ${side}` : `STATS · SIDE ${side}`}
+      </div>
+      <div style={{ fontSize: 11, color: s.barHint }}>
+        {live ? <>last hit &mdash; {hit}</> : <>{lead.name}</>}
+      </div>
+    </button>
+  );
+}

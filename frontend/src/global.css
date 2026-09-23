@@ -1,0 +1,8 @@
+html, body, #root { height: 100%; }
+body { margin: 0; background: #0B0D10; font-family: Manrope, sans-serif; -webkit-tap-highlight-color: transparent; }
+button { font-family: inherit; color: inherit; cursor: pointer; }
+button:disabled { cursor: default; }
+.digits { font-family: 'Bebas Neue', sans-serif; }
+.mono { font-family: 'JetBrains Mono', monospace; }
+a { color: #C8FF4D; }
+a:hover { color: #DFFF8C; }
