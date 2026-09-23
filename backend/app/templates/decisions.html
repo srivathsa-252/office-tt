@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+{% if live %}<meta http-equiv="refresh" content="3">{% endif %}
+<title>Decision Log</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0F1216; --surface: #1B1F27; --raised: #232837; --border: #2A3040; --row: #1F232B;
+    --text: #F4F6F8; --soft: #C6CAD2; --muted: #8B93A1; --faint: #5A6270;
+    --lime: #C8FF4D; --teal: #2DD4BF; --coral: #FF6B4A; --blue: #7AA2F7;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font: 15px/1.55 Manrope, system-ui, sans-serif; }
+  a { color: var(--lime); } a:hover { color: #DFFF8C; }
+  .mono { font-family: 'JetBrains Mono', ui-monospace, monospace; }
+  .wrap { max-width: 1040px; margin: 0 auto; padding: 32px 16px 64px; }
+  .eyebrow { font-size: 12px; letter-spacing: 1.5px; color: var(--muted); font-weight: 700; text-transform: uppercase; }
+  h1 { margin: 4px 0 6px; font-size: 28px; font-weight: 800; }
+  .lede { color: var(--soft); margin: 0 0 24px; max-width: 70ch; }
+  nav.tabs { display: flex; gap: 4px; background: var(--surface); padding: 4px; border-radius: 12px; width: fit-content; margin-bottom: 20px; flex-wrap: wrap; }
+  nav.tabs a { padding: 8px 16px; border-radius: 9px; text-decoration: none; color: var(--text); font-weight: 700; font-size: 14px; }
+  nav.tabs a[aria-current="page"] { background: var(--lime); color: #12151A; }
+  .bar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 18px; }
+  select, .btn { background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 10px; padding: 8px 12px; font: inherit; font-size: 14px; }
+  .btn { text-decoration: none; display: inline-block; }
+  .btn.on { border-color: var(--lime); color: var(--lime); background: rgba(200,255,77,.1); }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 20px; }
+  .chip { padding: 5px 12px; border-radius: 999px; border: 1.5px solid var(--border); color: var(--muted); font-size: 12px; font-weight: 700; text-decoration: none; }
+  .chip.on { border-color: var(--lime); color: var(--lime); background: rgba(200,255,77,.12); }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 14px; padding: 18px 20px; margin-bottom: 14px; }
+  .card h2 { margin: 0 0 4px; font-size: 18px; font-weight: 800; }
+  .card .note { color: var(--muted); font-size: 13px; margin: 0 0 12px; }
+  ol.log { list-style: none; margin: 0; padding: 0; }
+  ol.log > li { display: grid; grid-template-columns: 82px 128px 1fr; gap: 12px; padding: 12px 4px; border-bottom: 1px solid var(--row); align-items: start; }
+  .time { color: var(--faint); font-size: 12px; padding-top: 2px; }
+  .badge { display: inline-block; font-size: 11px; font-weight: 700; letter-spacing: .5px; padding: 3px 9px; border-radius: 999px; white-space: nowrap; }
+  .g-rules { color: var(--lime); background: rgba(200,255,77,.1); }
+  .g-human { color: var(--coral); background: rgba(255,107,74,.12); }
+  .g-capture { color: var(--teal); background: rgba(45,212,191,.12); }
+  .g-rating { color: var(--blue); background: rgba(122,162,247,.14); }
+  .summary { color: var(--text); }
+  .meta { color: var(--faint); font-size: 12px; margin-top: 2px; }
+  .meta a { color: var(--muted); }
+  details { margin-top: 6px; }
+  details summary { cursor: pointer; color: var(--muted); font-size: 12px; font-weight: 700; }
+  table.ev { border-collapse: collapse; margin-top: 8px; font-size: 12px; width: 100%; }
+  table.ev th, table.ev td { text-align: left; padding: 4px 8px; border-bottom: 1px solid var(--row); vertical-align: top; }
+  table.ev th { color: var(--muted); font-weight: 600; white-space: nowrap; }
+  table.ev td { color: var(--soft); font-family: 'JetBrains Mono', ui-monospace, monospace; word-break: break-word; }
+  .scroll { overflow-x: auto; }
+  .point-head { margin: 22px 0 4px; font-size: 13px; font-weight: 800; color: var(--muted); letter-spacing: .5px; text-transform: uppercase; }
+  .point-head .undone { color: var(--coral); }
+  dl.rules { display: grid; grid-template-columns: minmax(150px, 220px) minmax(90px, 200px) 1fr; gap: 0; margin: 0; }
+  dl.rules > div { display: contents; }
+  dl.rules dt, dl.rules dd { margin: 0; padding: 9px 8px; border-top: 1px solid var(--row); }
+  dl.rules dt { font-weight: 700; }
+  dl.rules dd.v { color: var(--lime); font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 13px; }
+  dl.rules dd.m { color: var(--soft); font-size: 14px; }
+  .reported { font-size: 13px; color: var(--muted); margin: 0 0 10px; }
+  .reported b { color: var(--teal); }
+  .tag { display: grid; grid-template-columns: 130px 1fr; gap: 10px; padding: 8px 0; border-top: 1px solid var(--row); }
+  .tag .yes { color: var(--teal); font-weight: 800; } .tag .no { color: var(--faint); font-weight: 700; }
+  .empty { color: var(--faint); padding: 24px 4px; }
+  @media (max-width: 720px) {
+    ol.log > li { grid-template-columns: 1fr; gap: 4px; }
+    dl.rules { grid-template-columns: 1fr; }
+    dl.rules dd { border-top: none; padding-top: 0; }
+    .tag { grid-template-columns: 1fr; gap: 2px; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="eyebrow">Office TT</div>
+  <h1>Decision log</h1>
+  <p class="lede">Every decision the system makes, and why: the scoring rules, what the cameras and table sensor concluded, and how ratings moved. Coral entries are human input; everything else is automatic.</p>
+
+  <nav class="tabs" aria-label="Sections">
+    <a href="/decisions" {% if view == 'log' %}aria-current="page"{% endif %}>Log</a>
+    <a href="/decisions?view=rules" {% if view == 'rules' %}aria-current="page"{% endif %}>Rules in force</a>
+    <a href="/decisions?view=players" {% if view == 'players' %}aria-current="page"{% endif %}>Players</a>
+  </nav>
+
+{% macro value(v, key='') -%}
+  {%- if v is mapping -%}{{ table(v) }}
+  {%- elif v is sequence and v is not string -%}
+    {%- if v and v[0] is mapping -%}
+      {%- set cols = [] -%}{%- for row in v -%}{%- for k in row -%}{%- if k not in cols -%}{%- set _ = cols.append(k) -%}{%- endif -%}{%- endfor -%}{%- endfor -%}
+      <div class="scroll"><table class="ev"><tr>{% for c in cols %}<th>{{ c | replace('_', ' ') }}</th>{% endfor %}</tr>
+      {%- for row in v %}<tr>{% for c in cols %}<td>{{ fmt(row.get(c), c) }}</td>{% endfor %}</tr>{% endfor -%}
+      </table></div>
+    {%- elif v -%}{{ v | map('string') | join(', ') }}{%- else -%}—{%- endif -%}
+  {%- else -%}{{ fmt(v, key) }}{%- endif -%}
+{%- endmacro %}
+{% macro fmt(v, key='') -%}
+  {%- if v is none -%}—{%- elif (key == 'ts' or key.endswith('_ts')) and v is number and v > 1e9 -%}{{ v | clock }}{%- elif v is float -%}{{ '%.3f' | format(v) | replace('.000', '') }}{%- else -%}{{ v }}{%- endif -%}
+{%- endmacro %}
+{% macro table(d) -%}
+  <table class="ev">{% for k, v in d.items() %}<tr><th>{{ k | replace('_', ' ') }}</th><td>{{ value(v, k) }}</td></tr>{% endfor %}</table>
+{%- endmacro %}
+{% macro entry(d, show_match=True) -%}
+  <li>
+    <div class="time mono">{{ local(d.ts).strftime('%H:%M:%S') }}</div>
+    <div><span class="badge g-{{ group_of(d.kind) }}" title="{{ kinds.get(d.kind, ('', ''))[1] }}">{{ kinds.get(d.kind, (d.kind, ''))[0] }}</span></div>
+    <div>
+      <div class="summary">{{ d.summary }}</div>
+      <div class="meta">{{ local(d.ts).strftime('%a %d %b') }}{% if show_match and d.match_id %} · <a href="/decisions?match={{ d.match_id }}">match #{{ d.match_id }}</a>{% endif %}</div>
+      {% if d.detail %}<details><summary>Evidence</summary>{{ table(d.detail) }}</details>{% endif %}
+    </div>
+  </li>
+{%- endmacro %}
+
+{% if view == 'log' %}
+  <form class="bar" method="get" action="/decisions">
+    <label for="match" class="eyebrow">Match</label>
+    <select id="match" name="match" onchange="this.form.submit()">
+      <option value="">All matches</option>
+      {% for id, label in matches %}<option value="{{ id }}" {% if id == match_id %}selected{% endif %}>{{ label }}</option>{% endfor %}
+    </select>
+    {% if kind %}<input type="hidden" name="kind" value="{{ kind }}">{% endif %}
+    <noscript><button class="btn" type="submit">Show</button></noscript>
+    <a class="btn {% if live %}on{% endif %}" href="?{% if match_id %}match={{ match_id }}&amp;{% endif %}{% if kind %}kind={{ kind }}&amp;{% endif %}live={{ 0 if live else 1 }}">{{ 'Live: on' if live else 'Live: off' }}</a>
+    <span class="meta">{{ total }} decisions recorded</span>
+  </form>
+  <div class="chips" aria-label="Filter by kind">
+    <a class="chip {% if not kind %}on{% endif %}" href="?{% if match_id %}match={{ match_id }}{% endif %}">All</a>
+    {% for k, (label, _) in kinds.items() %}
+      <a class="chip {% if kind == k %}on{% endif %}" href="?kind={{ k }}{% if match_id %}&amp;match={{ match_id }}{% endif %}" title="{{ kinds[k][1] }}">{{ label }}</a>
+    {% endfor %}
+  </div>
+
+  {% if match_id %}
+    <div class="card"><h2>{{ match_title }}</h2><p class="note">Oldest first, grouped by point. <a href="/decisions">All matches</a></p></div>
+    {% for g in groups %}
+      {% if g.number %}<div class="point-head">Point {{ g.number }}{% if g.undone %} <span class="undone">· undone</span>{% endif %}</div>{% endif %}
+      <ol class="log">{% for d in g['items'] %}{{ entry(d, False) }}{% endfor %}</ol>
+    {% else %}<p class="empty">No decisions recorded for this match{% if kind %} of this kind{% endif %}.</p>{% endfor %}
+  {% else %}
+    <ol class="log">{% for d in items %}{{ entry(d) }}{% endfor %}</ol>
+    {% if not items %}<p class="empty">Nothing yet. Start a match, or run a camera or sensor worker, and decisions appear here.</p>{% endif %}
+    {% if older %}<p><a class="btn" href="?before={{ older }}{% if kind %}&amp;kind={{ kind }}{% endif %}">Older →</a></p>{% endif %}
+  {% endif %}
+
+{% elif view == 'rules' %}
+  {% for s in sections %}
+    <section class="card">
+      <h2>{{ s.title }}</h2>
+      <p class="note">{{ s.note }}</p>
+      {% for name, params in s.get('reported', []) %}
+        <p class="reported">{{ name[:1] | upper }}{{ name[1:] }}: {% if params %}running with {% for k, v in params.items() %}<b>{{ k | replace('_', ' ') }}</b> {{ v }}{% if not loop.last %} · {% endif %}{% endfor %}{% else %}not reported since the server started{% endif %}</p>
+      {% endfor %}
+      <dl class="rules">
+        {% for name, v, meaning in s.rules %}<div><dt>{{ name }}</dt><dd class="v">{{ v }}</dd><dd class="m">{{ meaning }}</dd></div>{% endfor %}
+      </dl>
+    </section>
+  {% endfor %}
+
+{% else %}
+  {% for row in players %}
+    <section class="card">
+      <h2>{{ row.player.name }}</h2>
+      <p class="note">Singles rating {{ '%.0f' | format(row.player.rating) }} ± {{ '%.0f' | format(row.player.rd) }} · {{ row.points }} points in finished matches · {{ row.samples }} face sample{{ '' if row.samples == 1 else 's' }}</p>
+      {% for t in row['style'] %}
+        <div class="tag"><div class="{{ 'yes' if t.applies else 'no' }}">{{ '✓' if t.applies else '–' }} {{ t.tag }}</div><div class="meta" style="font-size:13px;color:var(--soft)">{{ t.reason }}</div></div>
+      {% endfor %}
+    </section>
+  {% else %}<p class="empty">No players yet.</p>{% endfor %}
+{% endif %}
+</div>
+</body>
+</html>

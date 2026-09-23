@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from . import glicko2
 from .capture import UNKNOWN, CaptureHub, Hit
+from .decisions import explain_game, explain_rally, explain_serve, record
 from .models import Match, Pair, Player, Point, RatingHistory, utcnow
 from .rules import Format, MatchEngine, Mode, Side
 
@@ -26,6 +27,10 @@ def initials(name: str) -> str:
 
 def player_ref(p: Player) -> dict:
     return {"id": p.id, "name": p.name, "initials": initials(p.name)}
+
+
+def names_for(db: Session, ids: list[int]) -> dict[int, str]:
+    return {p.id: p.name for p in db.scalars(select(Player).where(Player.id.in_(ids)))}
 
 
 # -- engine -----------------------------------------------------------------
@@ -69,7 +74,7 @@ def create_match(
     if missing := set(ids) - found:
         raise ValueError(f"unknown player(s): {sorted(missing)}")
     # Validates roster shape and the first server/receiver pairing.
-    MatchEngine(
+    engine = MatchEngine(
         mode=mode,
         side_a=tuple(side_a),
         side_b=tuple(side_b),
@@ -82,6 +87,14 @@ def create_match(
     for m in db.scalars(select(Match).where(Match.status == "live")):
         m.status = "abandoned"
         m.closed_at = utcnow()
+        record(
+            db,
+            "match.abandoned",
+            f"Match #{m.id} abandoned after {len(m.points)} point(s): a new match was started "
+            "while it was live (one table). Abandoned matches are never rated.",
+            {"points_played": len(m.points)},
+            match_id=m.id,
+        )
 
     match = Match(
         mode=mode.value,
@@ -98,6 +111,30 @@ def create_match(
         first_receiver_id=first_receiver,
     )
     db.add(match)
+    db.flush()
+    names = names_for(db, ids)
+    order = [
+        f"{engine.turn_label(i)}: {names[sv]} → {names[rc]}"
+        for i, (sv, rc) in enumerate(engine.serve_order)
+    ]
+    how = (
+        "Doubles uses the fixed diagonal rotation A1→B1, B1→A1, A2→B2, B2→A2, "
+        f"{fmt.serves_per_turn} serves each, looping"
+        if mode is Mode.DOUBLES
+        else f"Singles alternates every {fmt.serves_per_turn} serves"
+    )
+    record(
+        db,
+        "match.created",
+        f"{mode.value.title()} match: {' & '.join(names[p] for p in side_a)} (Side A) vs "
+        f"{' & '.join(names[p] for p in side_b)} (Side B). {names[first_server]} serves first "
+        f"to {names[first_receiver]} (chosen on the setup screen). {how}; from "
+        f"{fmt.deuce_trigger}–{fmt.deuce_trigger} serve changes every point. "
+        + (f"Best of {fmt.best_of} games" if fmt.best_of > 1 else "A single game")
+        + f" to {fmt.points_to_win}, win by {fmt.win_margin}.",
+        {"serve_order": order, "format": match.format},
+        match_id=match.id,
+    )
     db.commit()
     hub.rally.reset()
     return match
@@ -117,7 +154,8 @@ def score_point(
     rally = hub.rally.close()
     hub.rally.reset()
     roster = {str(p) for p in match.side_a_players + match.side_b_players}
-    last_hitter = rally.last_hitter if rally.last_hitter in roster else UNKNOWN
+    rejected = rally.last_hitter if rally.last_hitter not in roster | {UNKNOWN} else None
+    last_hitter = UNKNOWN if rejected else rally.last_hitter
 
     point = Point(
         match_id=match.id,
@@ -132,6 +170,36 @@ def score_point(
         score_after_b=result.score_after[Side.B],
     )
     match.points.append(point)
+    db.flush()
+
+    names = names_for(db, match.side_a_players + match.side_b_players)
+    a, b = result.score_after[Side.A], result.score_after[Side.B]
+    how = f", ended by {win_type}" if win_type else ""
+    log = [
+        (
+            "point.scored",
+            f"Point to Side {winner.value} (tapped on the scoreboard{how}). "
+            f"Game {result.game_number}: {a}–{b}.",
+            {"win_type": win_type, "server": names[result.server]},
+        ),
+        *explain_rally(rally, names, rejected),
+    ]
+    if game := explain_game(engine, result):
+        log.append(game)
+    if result.match_winner is not None:
+        g = engine.games
+        log.append(
+            (
+                "match.won",
+                f"Side {result.match_winner.value} wins the match {g[Side.A]}–{g[Side.B]} in "
+                f"games (first to {engine.fmt.games_to_win} of {engine.fmt.best_of}). "
+                "Ratings are updated now.",
+                {"game_scores": [f"{x[Side.A]}–{x[Side.B]}" for x in engine.game_scores]},
+            )
+        )
+    log.append(("serve", *explain_serve(engine, result, names)))
+    for kind, summary, detail in log:
+        record(db, kind, summary, detail, match_id=match.id, point_id=point.id)
 
     if result.match_winner is not None:
         match.status = "finished"
@@ -148,15 +216,30 @@ def undo_last_point(db: Session, hub: CaptureHub, match: Match) -> None:
         raise ConflictError("match was abandoned")
     if not match.points:
         raise ConflictError("no points to undo")
+    reopened = ""
     if match.status == "finished":
         if live_match(db) is not None:
             raise ConflictError("another match has started since")
+        reopened = " The match was over, so it's reopened and its rating changes reverted."
         unrate_match(db, match)
         match.status = "live"
         match.winner = None
         match.closed_at = None
         match.game_scores = None
-    match.points.pop()
+    point = match.points.pop()
+    db.flush()
+    engine = engine_for(match)
+    names = names_for(db, match.side_a_players + match.side_b_players)
+    record(
+        db,
+        "undo",
+        f"Undid the point to Side {point.winner} at {point.score_after_a}–"
+        f"{point.score_after_b} (game {point.game_number}). Replayed the remaining "
+        f"{len(match.points)} point(s): score {engine.score[Side.A]}–{engine.score[Side.B]}, "
+        f"{names[engine.server]} to serve.{reopened}",
+        {"undone_point_id": point.id},
+        match_id=match.id,
+    )
     db.commit()
     hub.rally.reset()
 
@@ -196,7 +279,48 @@ def rate_match(db: Session, match: Match) -> None:
     ra, rb = _rating(a), _rating(b)
     new_a = glicko2.update(ra, [(rb, score_a)])
     new_b = glicko2.update(rb, [(ra, 1 - score_a)])
-    for entity, before, after in ((a, ra, new_a), (b, rb, new_b)):
+    names = names_for(db, match.side_a_players + match.side_b_players)
+
+    def label(e: Player | Pair) -> str:
+        return e.name if isinstance(e, Player) else " & ".join(names[p] for p in e.player_ids)
+
+    for entity, opp, before, opp_r, after, won in (
+        (a, b, ra, rb, new_a, score_a == 1),
+        (b, a, rb, ra, new_b, score_a == 0),
+    ):
+        p_win = glicko2.expected_score(before, opp_r)
+        surprise = (
+            "an upset, so it moves a lot"
+            if (won and p_win < 0.4) or (not won and p_win > 0.6)
+            else "roughly as expected"
+        )
+        synergy = ""
+        if expected[entity.id] is not None:
+            synergy = (
+                f" Synergy baseline: the partners' individual ratings predicted a "
+                f"{expected[entity.id]:.0%} win chance."
+            )
+        record(
+            db,
+            "rating.update",
+            f"{label(entity)} {before.rating:.0f} → {after.rating:.0f} "
+            f"({after.rating - before.rating:+.0f}): {'won' if won else 'lost'} against "
+            f"{label(opp)} ({opp_r.rating:.0f}). Glicko-2 gave a {p_win:.0%} win chance, so the "
+            f"result was {surprise}; uncertainty (RD) {before.rd:.0f} → {after.rd:.0f}.{synergy}",
+            {
+                "entity": "player" if isinstance(entity, Player) else "pair",
+                "rating_before": before.rating,
+                "rating_after": after.rating,
+                "rd_before": before.rd,
+                "rd_after": after.rd,
+                "volatility_before": before.volatility,
+                "volatility_after": after.volatility,
+                "win_probability": p_win,
+                "tau": glicko2.TAU,
+                "pair_predicted_from_individuals": expected[entity.id],
+            },
+            match_id=match.id,
+        )
         entity.rating, entity.rd, entity.volatility = after.rating, after.rd, after.volatility
         db.add(
             RatingHistory(

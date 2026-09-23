@@ -9,6 +9,7 @@ export default defineConfig({
     host: true,
     proxy: {
       "/api": backend,
+      "/decisions": backend,
       "/ws": { target: backend.replace(/^http/, "ws"), ws: true },
     },
   },

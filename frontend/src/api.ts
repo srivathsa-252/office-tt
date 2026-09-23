@@ -19,6 +19,8 @@ export const api = {
   players: () => req<PlayerRef[]>("GET", "/api/players"),
   addPlayer: (name: string) => req<PlayerRef>("POST", "/api/players", { name }),
   playerStats: (id: number) => req<PlayerStats>("GET", `/api/players/${id}/stats`),
+  requestEnroll: (camera: SideKey, player_id: number) =>
+    req<{ id: number }>("POST", "/api/capture/enroll-requests", { camera, player_id }),
   detections: () => req<Record<SideKey, PlayerRef[]>>("GET", "/api/capture/detections"),
   liveMatch: () => req<MatchState>("GET", "/api/matches/live"),
   match: (id: number) => req<MatchState>("GET", `/api/matches/${id}`),

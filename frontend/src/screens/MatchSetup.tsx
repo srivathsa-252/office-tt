@@ -311,6 +311,8 @@ export function MatchSetup() {
             canClear={!!manual[picking.side][picking.index]}
             onPick={(p) => {
               setManualSlot(picking.side, picking.index, p);
+              // Ask that side's camera to learn this face, so next time it's detected.
+              if (p) api.requestEnroll(picking.side, p.id).catch(() => {});
               setPicking(null);
             }}
             onClose={() => setPicking(null)}

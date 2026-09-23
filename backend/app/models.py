@@ -104,3 +104,30 @@ class RatingHistory(Base):
     # ratings — the baseline for doubles synergy.
     expected_score: Mapped[float | None] = mapped_column(Float)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class FaceEmbedding(Base):
+    """One SFace embedding (128 floats, L2-normalised) of a player's face.
+    Several per player; matching uses the best of them. This supersedes
+    `Player.face_embedding_ref` — the gallery lives in the database."""
+
+    __tablename__ = "face_embedding"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    player_id: Mapped[int] = mapped_column(ForeignKey("player.id"), index=True)
+    vector: Mapped[list[float]] = mapped_column(JSON)
+    source: Mapped[str] = mapped_column(String(40))  # e.g. "camera A", "image"
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+
+class Decision(Base):
+    """Every automated (or recorded human) decision, with its evidence —
+    what the /decisions page renders."""
+
+    __tablename__ = "decision"
+    id: Mapped[int] = mapped_column(primary_key=True)
+    ts: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, index=True)
+    kind: Mapped[str] = mapped_column(String(40), index=True)
+    match_id: Mapped[int | None] = mapped_column(ForeignKey("match.id"), index=True)
+    point_id: Mapped[int | None] = mapped_column(Integer)
+    summary: Mapped[str] = mapped_column(String(500))
+    detail: Mapped[dict] = mapped_column(JSON, default=dict)

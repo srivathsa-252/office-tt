@@ -53,6 +53,10 @@ class PointResult:
     score_after: dict[Side, int]
     game_winner: Side | None
     match_winner: Side | None
+    # Serve bookkeeping, for explaining the decision:
+    serve_number: int  # which serve of the turn this point was (1-based)
+    rotation_size: int  # serves per turn in force when the point ended (5, or 1 at deuce)
+    serve_changed: bool  # serve passed to the next turn in the rotation
 
 
 @dataclass
@@ -126,6 +130,16 @@ class MatchEngine:
     def serves_remaining(self) -> int:
         return max(self.serves_in_turn - self.serve_count, 0)
 
+    def turn_label(self, index: int | None = None) -> str:
+        """Rotation position as the spec writes it, e.g. "A1→B1" (doubles) or "A→B"."""
+        server, receiver = self.serve_order[self.turn_index if index is None else index]
+        if self.mode is Mode.SINGLES:
+            return f"{self.side_of(server).value}→{self.side_of(receiver).value}"
+        slot = {self.serve_order[0][0]: 1, self.serve_order[0][1]: 1}
+        slot.update({self.serve_order[2][0]: 2, self.serve_order[2][1]: 2})
+        s_side, r_side = self.side_of(server).value, self.side_of(receiver).value
+        return f"{s_side}{slot[server]}→{r_side}{slot[receiver]}"
+
     @property
     def game_number(self) -> int:
         return self.game_index + 1
@@ -139,7 +153,9 @@ class MatchEngine:
 
         self.score[winner] += 1
         self.serve_count += 1
-        if self.serve_count >= self.serves_in_turn:
+        serve_number, rotation_size = self.serve_count, self.serves_in_turn
+        serve_changed = self.serve_count >= rotation_size
+        if serve_changed:
             self.turn_index = (self.turn_index + 1) % len(self.serve_order)
             self.serve_count = 0
 
@@ -161,6 +177,9 @@ class MatchEngine:
             score_after=score_after,
             game_winner=game_winner,
             match_winner=self.match_winner,
+            serve_number=serve_number,
+            rotation_size=rotation_size,
+            serve_changed=serve_changed,
         )
 
     def _check_game_win(self) -> Side | None:

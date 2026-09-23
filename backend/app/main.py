@@ -15,7 +15,10 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from . import db as dbmod
 from .capture import Hit, hub, now
-from .models import Match, Player
+from .decisions import explain_detections, explain_swing, record
+from .explain_page import register as register_decisions_page
+from .faces_gallery import normalise
+from .models import FaceEmbedding, Match, Player
 from .rules import Format, Mode, Side
 from .service import (
     ConflictError,
@@ -62,19 +65,52 @@ class PointIn(BaseModel):
     win_type: Literal["smash", "fault", "net", "out"] | None = None
 
 
+class FaceEvidence(BaseModel):
+    player_id: int | None = None  # who it was matched to, if anyone
+    similarity: float | None = None  # cosine similarity of the best gallery match
+    best_player_id: int | None = None  # the closest player, even if below threshold
+    presence: str | None = None  # e.g. "4/5": matched in 4 of the last 5 checks
+
+
 class DetectionsIn(BaseModel):
     camera: Side  # the end the camera is mounted at == the side it faces
     player_ids: list[int]
+    faces: list[FaceEvidence] = []
+    threshold: float | None = None
 
 
 class TickIn(BaseModel):
     ts: float | None = None
+    strength: float | None = None  # impulse peak, in the sensor's own units
 
 
 class HitIn(BaseModel):
     camera: Side
     player_id: int | None = None
     ts: float | None = None
+    # Swing detector evidence: speed, threshold, wrist, how the player was linked.
+    evidence: dict = {}
+
+
+class DeviceParamsIn(BaseModel):
+    device: str = Field(min_length=1, max_length=40)  # "camera A", "sensor"
+    params: dict
+
+
+class FacesIn(BaseModel):
+    vectors: list[list[float]] = Field(min_length=1)
+    source: str = Field("api", max_length=40)
+    request_id: int | None = None
+    evidence: dict = {}
+
+
+class EnrollRequestIn(BaseModel):
+    camera: Side
+    player_id: int
+
+
+class EnrollFailedIn(BaseModel):
+    reason: str = Field(max_length=300)
 
 
 def create_app(session_factory: sessionmaker | None = None, init: bool = True) -> FastAPI:
@@ -230,32 +266,135 @@ def create_app(session_factory: sessionmaker | None = None, init: bool = True) -
         return out
 
     @app.post("/api/capture/detections", status_code=204)
-    def post_detections(body: DetectionsIn):
-        hub.detections[body.camera] = list(dict.fromkeys(body.player_ids))
+    def post_detections(body: DetectionsIn, db: Session = Depends(get_db)):
+        ids = list(dict.fromkeys(body.player_ids))
+        # Logged only when who's recognised changes (it's posted several times a second).
+        changed = set(ids) != set(hub.detections[body.camera])
+        hub.detections[body.camera] = ids
+        if changed:
+            record(db, "face.detections", *explain_detections(db, body), match_id=None)
+            db.commit()
 
     @app.post("/api/capture/ticks", status_code=204)
     async def post_tick(body: TickIn):
         async with lock:
-            hub.rally.add_tick(body.ts if body.ts is not None else now())
+            hub.rally.add_tick(body.ts if body.ts is not None else now(), body.strength)
 
     @app.post("/api/capture/hits", status_code=204)
     async def post_hit(body: HitIn, db: Session = Depends(get_db)):
         async with lock:
             match = live_match(db)
+            if match is None:
+                return  # warm-up swings between matches mean nothing
             side = body.camera
             player_id = body.player_id
-            if match is not None and player_id is not None:
+            dropped = None
+            if player_id is not None:
                 if player_id in match.side_a_players:
                     side = Side.A
                 elif player_id in match.side_b_players:
                     side = Side.B
                 else:
-                    player_id = None  # not in this match: don't attribute it
-            hub.rally.add_hit(
-                Hit(ts=body.ts if body.ts is not None else now(), side=side, player_id=player_id)
-            )
+                    dropped, player_id = player_id, None  # not in this match
+            ts = body.ts if body.ts is not None else now()
+            hub.rally.add_hit(Hit(ts=ts, side=side, player_id=player_id))
+            summary, detail = explain_swing(db, body, side, player_id, dropped)
+            record(db, "swing", summary, {**detail, "ts": ts}, match_id=match.id)
+            db.commit()
             await broadcast_live(db)
 
+    @app.post("/api/capture/device-params", status_code=204)
+    def post_device_params(body: DeviceParamsIn, db: Session = Depends(get_db)):
+        if hub.device_params.get(body.device) != body.params:
+            hub.device_params[body.device] = body.params
+            settings = ", ".join(f"{k} = {v}" for k, v in body.params.items())
+            record(db, "device.config", f"{body.device} started with {settings}.", body.params)
+            db.commit()
+
+    # -- face gallery + enrollment ------------------------------------------
+
+    @app.get("/api/face-gallery")
+    def face_gallery(db: Session = Depends(get_db)):
+        rows = db.scalars(select(FaceEmbedding).order_by(FaceEmbedding.player_id)).all()
+        gallery: dict[int, list] = defaultdict(list)
+        for r in rows:
+            gallery[r.player_id].append(r.vector)
+        return [{"player_id": pid, "vectors": v} for pid, v in gallery.items()]
+
+    @app.post("/api/players/{player_id}/faces", status_code=201)
+    def add_faces(player_id: int, body: FacesIn, db: Session = Depends(get_db)):
+        player = db.get(Player, player_id)
+        if player is None:
+            raise HTTPException(404, "player not found")
+        try:
+            vectors = [normalise(v) for v in body.vectors]
+        except ValueError as e:
+            raise HTTPException(422, str(e))
+        for v in vectors:
+            db.add(FaceEmbedding(player_id=player_id, vector=v, source=body.source))
+        req = hub.enroll_request(body.request_id) if body.request_id else None
+        if req is not None:
+            req.status = "done"
+        db.flush()
+        total = db.query(FaceEmbedding).filter_by(player_id=player_id).count()
+        why = f"; {body.evidence['why']}" if body.evidence.get("why") else ""
+        record(
+            db,
+            "face.enrolled",
+            f"Saved {len(vectors)} face sample(s) for {player.name} from {body.source}{why}. "
+            f"{player.name} now has {total} sample(s); a face matches them if its similarity "
+            "to any one of them clears the camera's threshold.",
+            {**body.evidence, "samples_added": len(vectors), "samples_total": total},
+        )
+        db.commit()
+        return {"player_id": player_id, "samples": total}
+
+    @app.delete("/api/players/{player_id}/faces", status_code=204)
+    def clear_faces(player_id: int, db: Session = Depends(get_db)):
+        db.query(FaceEmbedding).filter_by(player_id=player_id).delete()
+        db.commit()
+
+    @app.post("/api/capture/enroll-requests", status_code=201)
+    def request_enroll(body: EnrollRequestIn, db: Session = Depends(get_db)):
+        player = db.get(Player, body.player_id)
+        if player is None:
+            raise HTTPException(404, "player not found")
+        req = hub.request_enroll(body.camera, body.player_id)
+        record(
+            db,
+            "face.enroll_requested",
+            f"{player.name} was picked by hand for Side {body.camera.value}, so camera "
+            f"{body.camera.value} is asked to learn their face. It only does so if exactly one "
+            "face in view is unrecognised — otherwise it can't tell which face is theirs.",
+            {"request_id": req.id},
+        )
+        db.commit()
+        return {"id": req.id}
+
+    @app.get("/api/capture/enroll-requests")
+    def pending_enrolls(camera: Side):
+        return [
+            {"id": r.id, "player_id": r.player_id, "created": r.created}
+            for r in hub.enroll_requests
+            if r.camera is camera and r.status == "pending"
+        ]
+
+    @app.post("/api/capture/enroll-requests/{rid}/failed", status_code=204)
+    def enroll_failed(rid: int, body: EnrollFailedIn, db: Session = Depends(get_db)):
+        req = hub.enroll_request(rid)
+        if req is None or req.status != "pending":
+            raise HTTPException(404, "no such pending request")
+        req.status = "failed"
+        player = db.get(Player, req.player_id)
+        record(
+            db,
+            "face.enroll_failed",
+            f"Camera {req.camera.value} didn't learn {player.name}'s face: {body.reason}",
+            {"request_id": rid},
+        )
+        db.commit()
+
+    register_decisions_page(app, get_db)
     return app
 
 
