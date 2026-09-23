@@ -39,18 +39,22 @@ export function LiveScoreboard() {
     run(() => api.scorePoint(matchId, side, winType));
   };
 
-  // Undo has no control in the design; Backspace / Ctrl+Z on an attached keyboard.
+  const undo = useCallback(() => {
+    setConfirmFor(null);
+    run(() => api.undo(matchId));
+  }, [matchId, run]);
+
+  // Also on an attached keyboard: Backspace / Ctrl+Z.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Backspace" || (e.key === "z" && (e.ctrlKey || e.metaKey))) {
         e.preventDefault();
-        setConfirmFor(null);
-        run(() => api.undo(matchId));
+        undo();
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [matchId, run]);
+  }, [undo]);
 
   if (!m) return <Stage width={1280} height={720} background={C.bgScoreboard}>{null}</Stage>;
 
@@ -126,12 +130,17 @@ export function LiveScoreboard() {
               </div>
             )}
           </div>
-          {live && m.deuce && <Pill>DEUCE</Pill>}
-          {!live && (
-            <Link to="/setup" style={{ textDecoration: "none" }}>
-              <Pill>NEW MATCH</Pill>
-            </Link>
-          )}
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            {m.status !== "abandoned" && m.points_played > 0 && (
+              <UndoButton disabled={busy} onClick={undo} />
+            )}
+            {live && m.deuce && <Pill>DEUCE</Pill>}
+            {!live && (
+              <Link to="/setup" style={{ textDecoration: "none" }}>
+                <Pill>NEW MATCH</Pill>
+              </Link>
+            )}
+          </div>
         </div>
 
         <div
@@ -183,6 +192,44 @@ function Pill({ children }: { children: string }) {
         {children}
       </div>
     </div>
+  );
+}
+
+/**
+ * Not in the design: a neutral twin of the DEUCE pill. The 44px hit area is
+ * padded out with negative margin so the header keeps the design's height.
+ */
+function UndoButton({ onClick, disabled }: { onClick: () => void; disabled: boolean }) {
+  return (
+    <button
+      onClick={onClick}
+      disabled={disabled}
+      aria-label="Undo last point"
+      style={{ background: "none", border: "none", padding: 9, margin: -9 }}
+    >
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 6,
+          padding: "6px 14px",
+          border: `1px solid ${C.border}`,
+          borderRadius: 999,
+          opacity: disabled ? 0.5 : 1,
+        }}
+      >
+        <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke={C.muted} strokeWidth={2.5}>
+          <path d="M9 14L4 9l5-5" />
+          <path d="M4 9h10.5a5.5 5.5 0 010 11H11" />
+        </svg>
+        <div
+          className="mono"
+          style={{ fontSize: 11, letterSpacing: 1.5, color: C.muted, fontWeight: 700 }}
+        >
+          UNDO
+        </div>
+      </div>
+    </button>
   );
 }
 
