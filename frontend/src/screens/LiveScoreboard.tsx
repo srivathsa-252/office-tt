@@ -2,10 +2,11 @@ import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { api, subscribeMatch } from "../api";
 import { Avatar, AvatarPair } from "../components/Avatar";
+import { CameraPreviewPanel, CamerasToggle, useCameraStatus } from "../components/CameraPreview";
 import { Stage } from "../components/Stage";
 import { C, SIDE, type SideKey } from "../theme";
 import { activePlayer, partnerOf, teamName } from "../match";
-import type { CameraStatus, MatchState, WinType } from "../types";
+import type { MatchState, WinType } from "../types";
 
 const TAGS: { key: WinType; label: string }[] = [
   { key: "smash", label: "Smash" },
@@ -13,8 +14,6 @@ const TAGS: { key: WinType; label: string }[] = [
   { key: "net", label: "Net" },
   { key: "out", label: "Out" },
 ];
-
-const CAMERA_STATUS_POLL_MS = 3000;
 
 export function LiveScoreboard() {
   const matchId = Number(useParams().matchId);
@@ -24,7 +23,7 @@ export function LiveScoreboard() {
   const [tag, setTag] = useState<WinType | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [cameraStatus, setCameraStatus] = useState<Record<SideKey, CameraStatus> | null>(null);
+  const cameraStatus = useCameraStatus();
   const [showCameras, setShowCameras] = useState(false);
   const [confirmEnd, setConfirmEnd] = useState(false);
 
@@ -32,20 +31,6 @@ export function LiveScoreboard() {
     api.config().then((c) => setCaptureWinType(c.capture_win_type));
     return subscribeMatch(matchId, setM);
   }, [matchId]);
-
-  // Auto-detects how many camera workers are actually running (1 or 2), not
-  // just assumed — see CameraPreviewPanel.
-  useEffect(() => {
-    let alive = true;
-    const poll = () =>
-      api.cameraStatus().then((s) => alive && setCameraStatus(s), () => {});
-    poll();
-    const t = window.setInterval(poll, CAMERA_STATUS_POLL_MS);
-    return () => {
-      alive = false;
-      window.clearInterval(t);
-    };
-  }, []);
 
   const run = useCallback(async (fn: () => Promise<MatchState>) => {
     setBusy(true);
@@ -215,7 +200,11 @@ export function LiveScoreboard() {
           <BarZone m={m} side="B" onTap={tap} disabled={busy} />
         </div>
 
-        <CamerasToggle status={cameraStatus} onClick={() => setShowCameras(true)} />
+        <CamerasToggle
+          status={cameraStatus}
+          onClick={() => setShowCameras(true)}
+          style={{ position: "absolute", right: 16, bottom: 16, zIndex: 5 }}
+        />
         {showCameras && (
           <CameraPreviewPanel status={cameraStatus} onClose={() => setShowCameras(false)} />
         )}
@@ -552,247 +541,6 @@ function TagChips({
           </button>
         );
       })}
-    </div>
-  );
-}
-
-const CAMERA_SIDES: SideKey[] = ["A", "B"];
-
-/** Floating pill, bottom-right: opens the live-preview panel. Warns inline
- * (no separate alert) when fewer than 2 camera workers are actually posting. */
-function CamerasToggle({
-  status,
-  onClick,
-}: {
-  status: Record<SideKey, CameraStatus> | null;
-  onClick: () => void;
-}) {
-  const activeCount = status ? CAMERA_SIDES.filter((s) => status[s]?.active).length : null;
-  const warn = activeCount !== null && activeCount < 2;
-  return (
-    <button
-      onClick={onClick}
-      aria-label="Show camera previews"
-      style={{
-        position: "absolute",
-        right: 16,
-        bottom: 16,
-        zIndex: 5,
-        display: "flex",
-        alignItems: "center",
-        gap: 7,
-        padding: "8px 14px",
-        borderRadius: 999,
-        border: `1px solid ${warn ? C.coral : C.border}`,
-        background: "rgba(11,13,16,0.85)",
-        color: warn ? C.coral : C.muted,
-      }}
-    >
-      <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
-        <rect x={2} y={6} width={14} height={12} rx={2} />
-        <path d="M16 10l6-3v10l-6-3" />
-      </svg>
-      <div className="mono" style={{ fontSize: 11, letterSpacing: 1.5, fontWeight: 700 }}>
-        CAMERAS{activeCount !== null ? ` · ${activeCount}/2` : ""}
-      </div>
-    </button>
-  );
-}
-
-/** Shows what the backend's camera workers (app/devices/camera.py) are
- * actually seeing — auto-detects 1 vs 2 running cameras from /api/capture/camera-status
- * and warns inline about whichever side is missing, instead of assuming both
- * are connected. A switch control picks which feed is big when there's only
- * room for one (e.g. on a phone). */
-function CameraPreviewPanel({
-  status,
-  onClose,
-}: {
-  status: Record<SideKey, CameraStatus> | null;
-  onClose: () => void;
-}) {
-  const [big, setBig] = useState<SideKey | null>(null);
-
-  const active = CAMERA_SIDES.filter((s) => status?.[s]?.active);
-  const missing = CAMERA_SIDES.filter((s) => !status?.[s]?.active);
-  // With only one camera live there's nothing to switch between — show it big.
-  const shown = active.length === 1 ? active[0] : big;
-  const feeds = shown ? [shown] : active;
-
-  return (
-    <div
-      style={{
-        position: "absolute",
-        inset: 0,
-        zIndex: 10,
-        background: "rgba(11,13,16,0.97)",
-        display: "flex",
-        flexDirection: "column",
-        padding: "24px 40px 30px",
-      }}
-    >
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-        <div
-          className="mono"
-          style={{ fontSize: 12, letterSpacing: 2, color: C.muted, fontWeight: 700, textTransform: "uppercase" }}
-        >
-          Cameras &middot; {active.length} of 2 live
-        </div>
-        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-          {active.length === 2 && (
-            <button
-              onClick={() => setBig((b) => (b ? null : "A"))}
-              style={{
-                padding: "6px 14px",
-                borderRadius: 999,
-                border: `1px solid ${C.border}`,
-                background: "transparent",
-                color: C.muted,
-                fontSize: 12,
-                fontWeight: 700,
-              }}
-            >
-              {big ? "Show both" : "Switch view"}
-            </button>
-          )}
-          <button
-            onClick={onClose}
-            aria-label="Close camera preview"
-            style={{
-              width: 32,
-              height: 32,
-              borderRadius: 999,
-              border: `1px solid ${C.border}`,
-              background: "transparent",
-              color: C.muted,
-              fontSize: 14,
-              fontWeight: 700,
-            }}
-          >
-            &times;
-          </button>
-        </div>
-      </div>
-
-      {missing.length > 0 && (
-        <div
-          style={{
-            marginTop: 14,
-            padding: "10px 14px",
-            borderRadius: 10,
-            border: `1px solid ${C.coral}`,
-            background: "rgba(255,107,74,0.1)",
-            color: C.coral,
-            fontSize: 13,
-            fontWeight: 600,
-          }}
-        >
-          {missing.length === 2
-            ? "No cameras detected — start a camera worker (python -m app.devices.camera) to see a preview."
-            : `Only Camera ${active[0]} is running — Side ${missing[0]} has no preview until a second camera connects.`}
-        </div>
-      )}
-
-      <div style={{ flexGrow: 1, display: "flex", gap: 16, marginTop: 16, minHeight: 0 }}>
-        {feeds.length > 0 ? (
-          feeds.map((side) => <CameraFeed key={side} side={side} />)
-        ) : (
-          <div
-            style={{
-              flexGrow: 1,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              color: C.faint,
-              fontSize: 14,
-            }}
-          >
-            Waiting for a camera worker to connect&hellip;
-          </div>
-        )}
-      </div>
-
-      {shown && active.length === 2 && (
-        <div style={{ display: "flex", justifyContent: "center", gap: 8, marginTop: 16 }}>
-          {CAMERA_SIDES.map((side) => {
-            const on = shown === side;
-            return (
-              <button
-                key={side}
-                aria-pressed={on}
-                onClick={() => setBig(side)}
-                style={{
-                  padding: "8px 20px",
-                  borderRadius: 999,
-                  border: `1.5px solid ${on ? SIDE[side].color : C.border}`,
-                  background: on ? `rgba(${SIDE[side].tint},0.12)` : "transparent",
-                  color: on ? SIDE[side].color : C.muted,
-                  fontSize: 13,
-                  fontWeight: on ? 700 : 600,
-                }}
-              >
-                Side {side}
-              </button>
-            );
-          })}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function CameraFeed({ side }: { side: SideKey }) {
-  const [ok, setOk] = useState(true);
-  return (
-    <div
-      style={{
-        flex: 1,
-        display: "flex",
-        flexDirection: "column",
-        borderRadius: 14,
-        overflow: "hidden",
-        border: `1px solid ${C.border}`,
-        background: C.surface,
-        minWidth: 0,
-      }}
-    >
-      <div
-        className="mono"
-        style={{
-          padding: "8px 12px",
-          fontSize: 11,
-          fontWeight: 800,
-          letterSpacing: 1.5,
-          color: SIDE[side].color,
-        }}
-      >
-        CAMERA {side}
-      </div>
-      <div style={{ flexGrow: 1, position: "relative", background: "#000" }}>
-        <img
-          src={api.streamUrl(side)}
-          alt={`Live preview from camera ${side}`}
-          onLoad={() => setOk(true)}
-          onError={() => setOk(false)}
-          style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
-        />
-        {!ok && (
-          <div
-            style={{
-              position: "absolute",
-              inset: 0,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-              color: C.faint,
-              fontSize: 12,
-              background: "rgba(0,0,0,0.6)",
-            }}
-          >
-            No frame yet
-          </div>
-        )}
-      </div>
     </div>
   );
 }

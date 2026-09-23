@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api";
 import { Avatar, CheckIcon } from "../components/Avatar";
-import { Stage } from "../components/Stage";
+import { CameraPreviewPanel, CamerasToggle, useCameraStatus } from "../components/CameraPreview";
 import { C, SIDE, type SideKey } from "../theme";
 import type { Detections, Format, PlayerRef } from "../types";
 
@@ -15,12 +15,28 @@ const NO_DETECTIONS: Detections = {
   B: { players: [], unknown_present: false },
 };
 const CAMERA_COUNT_KEY = "tt-camera-count";
+const SHOW_CAMERAS_KEY = "tt-setup-show-cameras";
 const SERVES_PER_TURN_OPTIONS = [3, 5];
 const BEST_OF_OPTIONS = [1, 3, 5];
 
 function loadCameraCount(): 1 | 2 {
   return localStorage.getItem(CAMERA_COUNT_KEY) === "1" ? 1 : 2;
 }
+
+const card = {
+  background: C.surface,
+  border: `1px solid ${C.border}`,
+  borderRadius: 14,
+  padding: 16,
+} as const;
+
+const sectionLabel = {
+  fontSize: 12,
+  fontWeight: 700,
+  letterSpacing: 0.5,
+  color: C.muted,
+  textTransform: "uppercase",
+} as const;
 
 export function MatchSetup() {
   const navigate = useNavigate();
@@ -36,12 +52,20 @@ export function MatchSetup() {
   );
   const [newFaceDismissed, setNewFaceDismissed] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const cameraStatus = useCameraStatus();
+  const [showCameras, setShowCameras] = useState(
+    () => localStorage.getItem(SHOW_CAMERAS_KEY) !== "0",
+  );
 
   const need = mode === "singles" ? 1 : 2;
 
   useEffect(() => {
     localStorage.setItem(CAMERA_COUNT_KEY, String(cameraCount));
   }, [cameraCount]);
+
+  useEffect(() => {
+    localStorage.setItem(SHOW_CAMERAS_KEY, showCameras ? "1" : "0");
+  }, [showCameras]);
 
   useEffect(() => {
     api.config().then((c) => setFormat(c.default_format));
@@ -151,21 +175,19 @@ export function MatchSetup() {
   const usedIds = new Set(SIDES.flatMap((s) => roster(s).map((p) => p.id)));
 
   return (
-    <Stage width={390} height={844} background={C.bg}>
+    <div style={{ minHeight: "100%", background: C.bg, color: C.text }}>
       <div
         style={{
-          width: 390,
-          height: 844,
+          maxWidth: 760,
+          margin: "0 auto",
+          padding: "24px 20px 100px",
           boxSizing: "border-box",
-          background: C.bg,
-          color: C.text,
           display: "flex",
           flexDirection: "column",
-          overflow: "hidden",
-          position: "relative",
+          gap: 20,
         }}
       >
-        <div style={{ padding: "28px 24px 16px", display: "flex", flexDirection: "column", gap: 4 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
           <div
             style={{
               fontSize: 12,
@@ -177,59 +199,57 @@ export function MatchSetup() {
           >
             New Match
           </div>
-          <h1 style={{ margin: 0, fontSize: 26, fontWeight: 800 }}>Set up the table</h1>
+          <h1 style={{ margin: 0, fontSize: 28, fontWeight: 800 }}>Set up the table</h1>
         </div>
 
         <div
           style={{
-            padding: "0 24px",
             display: "flex",
-            flexDirection: "column",
-            gap: 20,
-            overflowY: "auto",
-            flexGrow: 1,
+            background: C.surface,
+            borderRadius: 12,
+            padding: 4,
+            gap: 4,
+            maxWidth: 320,
           }}
         >
-          <div
-            style={{
-              display: "flex",
-              background: C.surface,
-              borderRadius: 12,
-              padding: 4,
-              gap: 4,
-            }}
-          >
-            {(["singles", "doubles"] as const).map((m) => (
-              <button
-                key={m}
-                aria-pressed={mode === m}
-                onClick={() => setMode(m)}
-                style={{
-                  flex: 1,
-                  padding: "10px 0",
-                  border: "none",
-                  borderRadius: 9,
-                  background: mode === m ? C.lime : C.surfaceRaised,
-                  color: mode === m ? "#12151A" : C.text,
-                  fontSize: 14,
-                  fontWeight: 700,
-                }}
-              >
-                {m === "singles" ? "Singles" : "Doubles"}
-              </button>
-            ))}
-          </div>
+          {(["singles", "doubles"] as const).map((m) => (
+            <button
+              key={m}
+              aria-pressed={mode === m}
+              onClick={() => setMode(m)}
+              style={{
+                flex: 1,
+                padding: "10px 0",
+                border: "none",
+                borderRadius: 9,
+                background: mode === m ? C.lime : C.surfaceRaised,
+                color: mode === m ? "#12151A" : C.text,
+                fontSize: 14,
+                fontWeight: 700,
+              }}
+            >
+              {m === "singles" ? "Singles" : "Doubles"}
+            </button>
+          ))}
+        </div>
 
-          {newFaceSlot && !newFaceDismissed && (
-            <NewFaceBanner
-              side={newFaceSlot.side}
-              onRegister={() =>
-                setPicking({ side: newFaceSlot.side, index: newFaceSlot.index, forNewFace: true })
-              }
-              onDismiss={() => setNewFaceDismissed(true)}
-            />
-          )}
+        {newFaceSlot && !newFaceDismissed && (
+          <NewFaceBanner
+            side={newFaceSlot.side}
+            onRegister={() =>
+              setPicking({ side: newFaceSlot.side, index: newFaceSlot.index, forNewFace: true })
+            }
+            onDismiss={() => setNewFaceDismissed(true)}
+          />
+        )}
 
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
+            gap: 20,
+          }}
+        >
           {SIDES.map((side) => {
             const opts = serveOptions(side);
             return (
@@ -243,7 +263,7 @@ export function MatchSetup() {
                     {cameraCount === 1 ? " (shared)" : ""} &middot; SIDE {side}
                   </div>
                 </div>
-                <div style={{ display: "flex", gap: 12 }}>
+                <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
                   {slots[side].map((slot, i) => (
                     <PlayerCard
                       key={i}
@@ -256,7 +276,7 @@ export function MatchSetup() {
                 {opts.length > 1 && (
                   <>
                     <div style={{ fontSize: 12, color: C.subtle }}>Serves first</div>
-                    <div style={{ display: "flex", gap: 8 }}>
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                       {opts.map((p) => {
                         const on = chosen(side) === p.id;
                         return (
@@ -266,6 +286,7 @@ export function MatchSetup() {
                             onClick={() => setFirstServer((prev) => ({ ...prev, [side]: p.id }))}
                             style={{
                               flex: 1,
+                              minWidth: 100,
                               padding: "9px 0",
                               borderRadius: 10,
                               border: `1.5px solid ${on ? C.lime : C.border}`,
@@ -285,31 +306,19 @@ export function MatchSetup() {
               </div>
             );
           })}
+        </div>
 
-          {format && (
+        {format && (
+          <div style={{ ...card, display: "flex", flexDirection: "column", gap: 10 }}>
+            <div style={sectionLabel}>Format</div>
+
             <div
               style={{
-                background: C.surface,
-                border: `1px solid ${C.border}`,
-                borderRadius: 14,
-                padding: 16,
-                display: "flex",
-                flexDirection: "column",
-                gap: 10,
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+                gap: 14,
               }}
             >
-              <div
-                style={{
-                  fontSize: 12,
-                  fontWeight: 700,
-                  letterSpacing: 0.5,
-                  color: C.muted,
-                  textTransform: "uppercase",
-                }}
-              >
-                Format
-              </div>
-
               <PickerRow
                 label="Serves per turn"
                 options={SERVES_PER_TURN_OPTIONS}
@@ -328,22 +337,35 @@ export function MatchSetup() {
                 value={cameraCount}
                 onChange={(v) => setCameraCount(v as 1 | 2)}
               />
-
-              <div style={{ fontSize: 11, color: C.faint, paddingTop: 2 }}>
-                {format.points_to_win} pts, win by {format.win_margin}; deuce from{" "}
-                {format.deuce_trigger}–{format.deuce_trigger}
-              </div>
             </div>
-          )}
-          {error && <div style={{ fontSize: 12, color: C.coral, fontWeight: 700 }}>{error}</div>}
+
+            <div style={{ fontSize: 11, color: C.faint, paddingTop: 2 }}>
+              {format.points_to_win} pts, win by {format.win_margin}; deuce from{" "}
+              {format.deuce_trigger}–{format.deuce_trigger}
+            </div>
+          </div>
+        )}
+
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <div style={sectionLabel}>Cameras</div>
+            <CamerasToggle status={cameraStatus} onClick={() => setShowCameras((v) => !v)} />
+          </div>
+          {showCameras && <CameraPreviewPanel status={cameraStatus} inline />}
         </div>
 
-        <div
-          style={{
-            padding: "16px 24px 28px",
-            background: "linear-gradient(180deg,rgba(15,18,22,0) 0%,#0F1216 40%)",
-          }}
-        >
+        {error && <div style={{ fontSize: 12, color: C.coral, fontWeight: 700 }}>{error}</div>}
+      </div>
+
+      <div
+        style={{
+          position: "sticky",
+          bottom: 0,
+          padding: "16px 20px 24px",
+          background: "linear-gradient(180deg,rgba(15,18,22,0) 0%,#0F1216 40%)",
+        }}
+      >
+        <div style={{ maxWidth: 760, margin: "0 auto" }}>
           <button
             onClick={start}
             disabled={!complete}
@@ -363,24 +385,24 @@ export function MatchSetup() {
             Start Match
           </button>
         </div>
-
-        {picking && (
-          <PlayerPicker
-            side={picking.side}
-            excluded={usedIds}
-            canClear={!!manual[picking.side][picking.index]}
-            autoFocusName={!!picking.forNewFace}
-            onPick={(p) => {
-              setManualSlot(picking.side, picking.index, p);
-              // Ask that camera to learn this face, so next time it's detected.
-              if (p) api.requestEnroll(cameraFor(picking.side), p.id).catch(() => {});
-              setPicking(null);
-            }}
-            onClose={() => setPicking(null)}
-          />
-        )}
       </div>
-    </Stage>
+
+      {picking && (
+        <PlayerPicker
+          side={picking.side}
+          excluded={usedIds}
+          canClear={!!manual[picking.side][picking.index]}
+          autoFocusName={!!picking.forNewFace}
+          onPick={(p) => {
+            setManualSlot(picking.side, picking.index, p);
+            // Ask that camera to learn this face, so next time it's detected.
+            if (p) api.requestEnroll(cameraFor(picking.side), p.id).catch(() => {});
+            setPicking(null);
+          }}
+          onClose={() => setPicking(null)}
+        />
+      )}
+    </div>
   );
 }
 
@@ -447,13 +469,14 @@ function NewFaceBanner({
         borderRadius: 12,
         border: `1px solid ${C.lime}`,
         background: "rgba(200,255,77,0.08)",
+        flexWrap: "wrap",
       }}
     >
       <svg width={18} height={18} viewBox="0 0 24 24" fill="none" stroke={C.lime} strokeWidth={2} style={{ flexShrink: 0 }}>
         <circle cx={12} cy={8} r={4} />
         <path d="M4 20c0-4 3.6-6 8-6s8 2 8 6" />
       </svg>
-      <div style={{ flexGrow: 1, fontSize: 12, color: C.text, fontWeight: 600 }}>
+      <div style={{ flexGrow: 1, fontSize: 12, color: C.text, fontWeight: 600, minWidth: 160 }}>
         New face on Side {side}&apos;s camera &mdash; register them?
       </div>
       <button
@@ -489,7 +512,7 @@ function PlayerCard({ side, slot, onClick }: { side: SideKey; slot: Slot; onClic
         onClick={onClick}
         aria-label={`Waiting for face on side ${side} — pick a player manually`}
         style={{
-          flex: 1,
+          flex: "1 1 120px",
           boxSizing: "content-box", // the design's cards are divs, not buttons
           background: C.surface,
           border: `1px dashed ${C.borderDashed}`,
@@ -515,7 +538,7 @@ function PlayerCard({ side, slot, onClick }: { side: SideKey; slot: Slot; onClic
     <button
       onClick={onClick}
       style={{
-        flex: 1,
+        flex: "1 1 120px",
         boxSizing: "content-box",
         background: C.surface,
         border: `1px solid ${C.border}`,
@@ -590,11 +613,14 @@ function PlayerPicker({
   return (
     <div
       style={{
-        position: "absolute",
+        position: "fixed",
         inset: 0,
         background: "rgba(11,13,16,0.8)",
         display: "flex",
-        alignItems: "flex-end",
+        alignItems: "center",
+        justifyContent: "center",
+        padding: 20,
+        zIndex: 30,
       }}
     >
       <div
@@ -602,12 +628,13 @@ function PlayerPicker({
         aria-label={`Pick a player for side ${side}`}
         style={{
           width: "100%",
-          maxHeight: "75%",
+          maxWidth: 420,
+          maxHeight: "85vh",
           boxSizing: "border-box",
           background: C.surface,
-          borderTop: `1px solid ${C.border}`,
-          borderRadius: "18px 18px 0 0",
-          padding: "20px 24px 28px",
+          border: `1px solid ${C.border}`,
+          borderRadius: 18,
+          padding: "20px 24px 24px",
           display: "flex",
           flexDirection: "column",
           gap: 12,
@@ -665,6 +692,7 @@ function PlayerPicker({
             placeholder="New player name"
             style={{
               flex: 1,
+              minWidth: 0,
               padding: "10px 12px",
               background: C.bg,
               border: `1px solid ${C.border}`,
