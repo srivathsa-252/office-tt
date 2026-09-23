@@ -6,14 +6,20 @@ import { Stage } from "../components/Stage";
 import { C, SIDE, type SideKey } from "../theme";
 import { activePlayer, partnerOf, teamName } from "../match";
 import type { MatchState, WinType } from "../types";
-import { PointConfirm } from "./PointConfirm";
+
+const TAGS: { key: WinType; label: string }[] = [
+  { key: "smash", label: "Smash" },
+  { key: "fault", label: "Fault" },
+  { key: "net", label: "Net" },
+  { key: "out", label: "Out" },
+];
 
 export function LiveScoreboard() {
   const matchId = Number(useParams().matchId);
   const navigate = useNavigate();
   const [m, setM] = useState<MatchState | null>(null);
   const [captureWinType, setCaptureWinType] = useState(false);
-  const [confirmFor, setConfirmFor] = useState<SideKey | null>(null);
+  const [tag, setTag] = useState<WinType | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -35,12 +41,12 @@ export function LiveScoreboard() {
   }, []);
 
   const score = (side: SideKey, winType: WinType | null) => {
-    setConfirmFor(null);
+    setTag(null);
     run(() => api.scorePoint(matchId, side, winType));
   };
 
   const undo = useCallback(() => {
-    setConfirmFor(null);
+    setTag(null);
     run(() => api.undo(matchId));
   }, [matchId, run]);
 
@@ -58,26 +64,13 @@ export function LiveScoreboard() {
 
   if (!m) return <Stage width={1280} height={720} background={C.bgScoreboard}>{null}</Stage>;
 
-  if (confirmFor && m.status === "live") {
-    return (
-      <PointConfirm
-        match={m}
-        preselected={confirmFor}
-        onConfirm={score}
-        onCancel={() => setConfirmFor(null)}
-      />
-    );
-  }
-
   const live = m.status === "live";
   const tap = (side: SideKey) => {
     if (busy) return;
     if (!live) {
       navigate(`/players/${activePlayer(m, side).id}`);
-    } else if (captureWinType) {
-      setConfirmFor(side);
     } else {
-      score(side, null);
+      score(side, tag);
     }
   };
 
@@ -166,6 +159,8 @@ export function LiveScoreboard() {
           <SideScore m={m} side="B" />
         </div>
 
+        {live && captureWinType && <TagChips tag={tag} onChange={setTag} />}
+
         <div style={{ display: "flex", height: 226, borderTop: `1px solid ${C.surface}` }}>
           <BarZone m={m} side="A" onTap={tap} disabled={busy} />
           <BarZone m={m} side="B" onTap={tap} disabled={busy} />
@@ -230,6 +225,60 @@ function UndoButton({ onClick, disabled }: { onClick: () => void; disabled: bool
         </div>
       </div>
     </button>
+  );
+}
+
+function TagChips({
+  tag,
+  onChange,
+}: {
+  tag: WinType | null;
+  onChange: (t: WinType | null) => void;
+}) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: 8,
+        padding: "0 40px 10px",
+      }}
+    >
+      <div
+        style={{
+          fontSize: 11,
+          fontWeight: 700,
+          letterSpacing: 0.4,
+          color: C.muted,
+          textTransform: "uppercase",
+          marginRight: 4,
+        }}
+      >
+        How it ended &middot; optional
+      </div>
+      {TAGS.map(({ key, label }) => {
+        const on = tag === key;
+        return (
+          <button
+            key={key}
+            aria-pressed={on}
+            onClick={() => onChange(on ? null : key)}
+            style={{
+              padding: "5px 14px",
+              borderRadius: 999,
+              border: `1.5px solid ${on ? C.lime : C.border}`,
+              background: on ? "rgba(200,255,77,0.12)" : "transparent",
+              color: on ? C.lime : C.muted,
+              fontSize: 12,
+              fontWeight: on ? 700 : 600,
+            }}
+          >
+            {label}
+          </button>
+        );
+      })}
+    </div>
   );
 }
 
