@@ -113,15 +113,21 @@ The page has three tabs:
 | `POST /api/capture/ticks` | `{ts?, strength?}` | One table contact. |
 | `POST /api/capture/hits` | `{camera, player_id?, ts?, evidence?}` | One swing. |
 | `POST /api/capture/device-params` | `{device, params}` | Thresholds a worker runs with (shown on `/decisions`). |
+| `POST /api/capture/frames` | `{camera, image, ts?}` | A downscaled JPEG (base64) for the live-preview panel. |
+| `GET /api/capture/preview/{camera}` | | The latest JPEG posted for that camera, or 404 if none yet. |
+| `GET /api/capture/camera-status` | | `{A, B}` → `{active, last_seen}`, from how recently each posted a preview frame. |
 | `GET /api/face-gallery` · `POST/DELETE /api/players/{id}/faces` | `{vectors, source, request_id?}` | The face gallery. |
 | `POST/GET /api/capture/enroll-requests` · `…/{id}/failed` | | Asks a camera to learn a face. |
 
 `ts` is epoch seconds from the shared clock. When it's omitted, the server's time is used.
 
+**Live preview.** The scoreboard screen has a "Cameras" toggle at the bottom that opens a panel with a live JPEG per running camera worker (refreshed a few times a second, from `--preview-every`, default 0.5 s). It auto-detects how many cameras are actually posting: one running camera shows one preview full-width; two show side by side; a camera that stops posting for `capture.FRAME_STALE_S` (4 s) drops out and the panel shows an inline warning naming which side is missing, instead of freezing on a stale frame. On a narrow (phone-width) screen there's room for only one preview at a time, so a switch button flips which camera is shown.
+
 **Placeholders to tune on the real table** (all shown on `/decisions?view=rules`):
 - hit window 1.5 s
 - swing speed 4.0 shoulder-widths/s
 - sensor threshold 0.08 (or use `--calibrate`)
+- camera considered live: posted a preview frame in the last 4 s
 - style-tag thresholds
 
 What I couldn't test here: real webcams, a real contact mic, and swing detection on real table-tennis footage. I only tested it on a synthetic clip made by sliding a still photo. The logic is unit-tested and the models were run on real photos.

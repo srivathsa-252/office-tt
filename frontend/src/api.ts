@@ -1,4 +1,4 @@
-import type { Config, Format, MatchState, PlayerRef, PlayerStats, WinType } from "./types";
+import type { CameraStatus, Config, Format, MatchState, PlayerRef, PlayerStats, WinType } from "./types";
 import type { SideKey } from "./theme";
 
 async function req<T>(method: string, path: string, body?: unknown): Promise<T> {
@@ -22,6 +22,8 @@ export const api = {
   requestEnroll: (camera: SideKey, player_id: number) =>
     req<{ id: number }>("POST", "/api/capture/enroll-requests", { camera, player_id }),
   detections: () => req<Record<SideKey, PlayerRef[]>>("GET", "/api/capture/detections"),
+  cameraStatus: () => req<Record<SideKey, CameraStatus>>("GET", "/api/capture/camera-status"),
+  previewUrl: (camera: SideKey) => `/api/capture/preview/${camera}`,
   liveMatch: () => req<MatchState>("GET", "/api/matches/live"),
   match: (id: number) => req<MatchState>("GET", `/api/matches/${id}`),
   createMatch: (body: {

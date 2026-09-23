@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
 import os
 from collections import defaultdict
 from contextlib import asynccontextmanager
@@ -10,7 +12,7 @@ from pathlib import Path
 from typing import Literal
 
 from fastapi import Depends, FastAPI, HTTPException, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from sqlalchemy import select
@@ -104,6 +106,12 @@ class HitIn(BaseModel):
 class DeviceParamsIn(BaseModel):
     device: str = Field(min_length=1, max_length=40)  # "camera A", "sensor"
     params: dict
+
+
+class FrameIn(BaseModel):
+    camera: Side
+    image: str  # base64-encoded JPEG
+    ts: float | None = None
 
 
 class FacesIn(BaseModel):
@@ -319,6 +327,26 @@ def create_app(session_factory: sessionmaker | None = None, init: bool = True) -
             settings = ", ".join(f"{k} = {v}" for k, v in body.params.items())
             record(db, "device.config", f"{body.device} started with {settings}.", body.params)
             db.commit()
+
+    @app.post("/api/capture/frames", status_code=204)
+    def post_frame(body: FrameIn):
+        try:
+            jpeg = base64.b64decode(body.image, validate=True)
+        except binascii.Error:
+            raise HTTPException(422, "image must be base64-encoded")
+        hub.record_frame(body.camera, jpeg, body.ts if body.ts is not None else now())
+
+    @app.get("/api/capture/preview/{camera}", response_class=Response)
+    def get_preview(camera: Side):
+        frame = hub.frames.get(camera)
+        if frame is None:
+            raise HTTPException(404, "no preview frame yet")
+        jpeg, _ts = frame
+        return Response(content=jpeg, media_type="image/jpeg")
+
+    @app.get("/api/capture/camera-status")
+    def get_camera_status():
+        return {side.value: info for side, info in hub.camera_status().items()}
 
     # -- face gallery + enrollment ------------------------------------------
 

@@ -165,6 +165,45 @@ def test_detections_roundtrip(client):
     assert [p["name"] for p in d["A"]] == ["Praneeth", "Abin"] and d["B"] == []
 
 
+def test_preview_frame_roundtrip(client):
+    import base64
+
+    jpeg = b"\xff\xd8\xff\xe0not-really-a-jpeg"
+    r = client.post(
+        "/api/capture/frames",
+        json={"camera": "A", "image": base64.b64encode(jpeg).decode("ascii")},
+    )
+    assert r.status_code == 204
+
+    got = client.get("/api/capture/preview/A")
+    assert got.status_code == 200
+    assert got.headers["content-type"] == "image/jpeg"
+    assert got.content == jpeg
+
+    assert client.get("/api/capture/preview/B").status_code == 404
+
+
+def test_preview_frame_rejects_bad_base64(client):
+    r = client.post("/api/capture/frames", json={"camera": "A", "image": "not base64!!"})
+    assert r.status_code == 422
+
+
+def test_camera_status_reflects_which_cameras_are_posting(client):
+    import base64
+
+    status = client.get("/api/capture/camera-status").json()
+    assert status["A"] == {"active": False, "last_seen": None}
+    assert status["B"] == {"active": False, "last_seen": None}
+
+    client.post(
+        "/api/capture/frames",
+        json={"camera": "A", "image": base64.b64encode(b"jpeg").decode("ascii")},
+    )
+    status = client.get("/api/capture/camera-status").json()
+    assert status["A"]["active"] is True and status["A"]["last_seen"] is not None
+    assert status["B"]["active"] is False
+
+
 @pytest.mark.parametrize(
     "body",
     [

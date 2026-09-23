@@ -47,6 +47,11 @@ export interface Config {
   default_format: Format;
 }
 
+export interface CameraStatus {
+  active: boolean;
+  last_seen: number | null;
+}
+
 export interface Synergy {
   pair_id: number;
   partner: PlayerRef;

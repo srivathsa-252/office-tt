@@ -17,6 +17,7 @@ from .rules import Side
 # Placeholders — tune once the sensor and cameras are on the table.
 HIT_WINDOW_S = 1.5  # a swing must precede the point-end contact by at most this
 HIT_TOLERANCE_S = 0.05  # allow for camera/sensor timestamp jitter
+FRAME_STALE_S = 4.0  # a camera counts as live only if it posted a preview frame this recently
 
 UNKNOWN = "unknown"
 
@@ -140,7 +141,23 @@ class CaptureHub:
     enroll_requests: list[EnrollRequest] = field(default_factory=list)
     # Thresholds each device last reported, for the /decisions "rules in force".
     device_params: dict[str, dict] = field(default_factory=dict)
+    # Latest preview JPEG per camera, for the live-preview panel: camera -> (bytes, ts).
+    frames: dict[Side, tuple[bytes, float]] = field(default_factory=dict)
     _next_request: int = 1
+
+    def record_frame(self, camera: Side, jpeg: bytes, ts: float) -> None:
+        self.frames[camera] = (jpeg, ts)
+
+    def camera_status(self) -> dict[Side, dict]:
+        status = {}
+        for side in (Side.A, Side.B):
+            frame = self.frames.get(side)
+            last_seen = frame[1] if frame else None
+            status[side] = {
+                "active": last_seen is not None and now() - last_seen < FRAME_STALE_S,
+                "last_seen": last_seen,
+            }
+        return status
 
     def request_enroll(self, camera: Side, player_id: int) -> EnrollRequest:
         # One pending request per camera: a newer pick replaces an older one.

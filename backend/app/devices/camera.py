@@ -7,6 +7,8 @@
 Every frame: pose → body tracks → swing detection → POST /api/capture/hits.
 Every --face-every seconds: face recognition → presence smoothing →
 POST /api/capture/detections, link faces to bodies, and serve enroll requests.
+Every --preview-every seconds: a downscaled JPEG → POST /api/capture/frames,
+for the live-preview panel on the scoreboard screen.
 """
 
 from __future__ import annotations
@@ -41,6 +43,7 @@ log = logging.getLogger("camera")
 ENROLL_TIMEOUT_S = 15.0
 GALLERY_REFRESH_S = 10.0
 POLL_S = 1.0
+PREVIEW_MAX_WIDTH = 480  # downscale before encoding, so the preview stays light on bandwidth
 
 
 class Api:
@@ -234,6 +237,22 @@ class CameraWorker:
             )
             self.enroll = None
 
+    def preview_step(self, frame) -> None:
+        import base64
+
+        import cv2
+
+        h, w = frame.shape[:2]
+        if w > PREVIEW_MAX_WIDTH:
+            frame = cv2.resize(frame, (PREVIEW_MAX_WIDTH, round(h * PREVIEW_MAX_WIDTH / w)))
+        ok, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 60])
+        if not ok:
+            return
+        self.api.post_async(
+            "/api/capture/frames",
+            {"camera": self.side, "image": base64.b64encode(buf.tobytes()).decode("ascii")},
+        )
+
     def run(self) -> None:
         import cv2
 
@@ -248,6 +267,7 @@ class CameraWorker:
                     "face_check_every_s": a.face_every,
                     "swing_speed_threshold": a.swing_speed if self.pose else "pose off",
                     "enroll_samples": ENROLL_SAMPLES,
+                    "preview_every_s": a.preview_every,
                 },
             },
         )
@@ -258,7 +278,7 @@ class CameraWorker:
             raise SystemExit(f"can't open camera/video {a.device!r}")
         is_file = isinstance(src, str) and Path(src).exists()
         fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
-        start, n, last_face = time.time(), 0, -1e9
+        start, n, last_face, last_preview = time.time(), 0, -1e9, -1e9
         log.info("camera %s running (%s)", self.side, a.device)
         while True:
             ok, frame = cap.read()
@@ -289,6 +309,9 @@ class CameraWorker:
             if ts - last_face >= a.face_every:
                 last_face = ts
                 self.face_check(frame, ts)
+            if a.preview_every > 0 and ts - last_preview >= a.preview_every:
+                last_preview = ts
+                self.preview_step(frame)
         # Let queued posts finish when replaying a file.
         while not self.api.q.empty():
             time.sleep(0.05)
@@ -301,6 +324,12 @@ def main() -> None:
     ap.add_argument("--api", default="http://localhost:8000")
     ap.add_argument("--models", type=Path, default=DEFAULT_DIR)
     ap.add_argument("--face-every", type=float, default=0.25, help="seconds between face checks")
+    ap.add_argument(
+        "--preview-every",
+        type=float,
+        default=0.5,
+        help="seconds between live-preview frames (0 disables the preview)",
+    )
     ap.add_argument("--match-threshold", type=float, default=MATCH_THRESHOLD)
     ap.add_argument("--swing-speed", type=float, default=SWING_SPEED)
     ap.add_argument("--max-players", type=int, default=2, help="bodies to track (2 = doubles)")

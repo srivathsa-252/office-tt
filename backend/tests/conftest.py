@@ -19,6 +19,7 @@ def client():
     dbmod.init_db(engine)
     hub.rally.reset()
     hub.detections = {k: [] for k in hub.detections}
+    hub.frames = {}
     factory = sessionmaker(bind=engine, expire_on_commit=False)
     with TestClient(create_app(factory, init=False)) as c:
         c.session_factory = factory

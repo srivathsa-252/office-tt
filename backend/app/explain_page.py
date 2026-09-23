@@ -131,6 +131,18 @@ def rules_in_force() -> list[dict]:
             ],
         },
         {
+            "title": "Live preview",
+            "note": "The scoreboard's preview panel, not used for scoring.",
+            "rules": [
+                (
+                    "Camera considered live",
+                    f"posted a frame in the last {capture.FRAME_STALE_S} s",
+                    "Below this, a camera's preview is dropped and the panel warns which side "
+                    "is missing instead of showing a frozen frame.",
+                ),
+            ],
+        },
+        {
             "title": "Face recognition",
             "note": "YuNet finds faces; SFace turns each into a 128-number fingerprint; the "
             "gallery match, smoothing and enrollment rules below are this app's.",
