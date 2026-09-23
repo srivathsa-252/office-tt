@@ -19,8 +19,12 @@ HIT_WINDOW_S = 1.5  # a swing must precede the point-end contact by at most this
 HIT_TOLERANCE_S = 0.05  # allow for camera/sensor timestamp jitter
 FRAME_STALE_S = 10.0  # a camera counts as live only if it posted a preview frame this recently
 # The setup screen polls detections every 1s while open (MatchSetup.tsx); treat
-# that as "someone's actively setting up a match" for this long after the last poll.
-SETUP_HEARTBEAT_STALE_S = 3.0
+# that as "someone's actively setting up a match" for this long after the last
+# poll. Generous on purpose: a browser tab backgrounded even briefly (e.g.
+# alt-tabbing to type a message) gets throttled and can easily miss a couple
+# of polls — 3s was tight enough that this paused the camera mid-registration,
+# silently stalling face-sample accumulation with no visible cause.
+SETUP_HEARTBEAT_STALE_S = 15.0
 
 UNKNOWN = "unknown"
 
