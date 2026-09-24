@@ -24,6 +24,11 @@ DETECT_SCORE = 0.8  # YuNet confidence to accept a face at all
 # Presence smoothing: a player counts as on this side if matched in K of the last N checks.
 PRESENCE_WINDOW = 5
 PRESENCE_MIN = 3
+# Ignore a detected face this small everywhere, not just while enrolling — it's
+# someone in the background or passing through, not actually at the table.
+# Lower than ENROLL_MIN_SIZE_PX (80): merely counting as "present" can tolerate
+# a smaller/farther face than trusting it enough to learn from or match by name.
+PRESENCE_MIN_SIZE_PX = 50
 # Enrollment: only learn from a face that's clearly a face and big enough to be detailed.
 ENROLL_MIN_SCORE = 0.9
 ENROLL_MIN_SIZE_PX = 80
@@ -141,7 +146,7 @@ def assign(
 def recognise(
     engine: FaceEngine, frame: np.ndarray, gallery: Gallery, threshold: float = MATCH_THRESHOLD
 ) -> list[FaceMatch]:
-    faces = engine.detect(frame)
+    faces = [f for f in engine.detect(frame) if min(f.box[2], f.box[3]) >= PRESENCE_MIN_SIZE_PX]
     embs = [engine.embed(frame, f) for f in faces]
     return [
         FaceMatch(f, e, pid, best, sim)

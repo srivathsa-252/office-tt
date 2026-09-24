@@ -74,7 +74,9 @@ Two pretrained OpenCV Zoo models do the pixel work: YuNet finds faces, and SFace
 - **Gallery.** Every player's face samples are stored in Postgres (the `face_embedding` table). A face's score is its best similarity to any one of a player's samples.
 - **Match.** A face is named only if its score reaches **0.363**, SFace's published threshold. The most similar face–player pairs are assigned first, so one player can't be two faces.
 - **Smoothing.** A player counts as on a side only once matched in **3 of the last 5** checks (4 checks a second), so one bad frame can't add or drop anyone.
+- **Size floor.** Any detected face under **50px** (the smaller of its width/height) is dropped before matching even starts — someone in the background or passing by, not actually at the table. Only "extra things" filtered this way, not a positional crop: general presence detection covers the whole frame, since players move around near the table, unlike the scan wizard's tight guide oval (below).
 - **Auto-enroll.** After a manual pick, a camera learns the face only if it's the single unrecognised face in view, confident (≥ 0.9) and at least 80 px. It takes 5 samples, all of which must be the same person. Otherwise it gives up after 15 s and logs why.
+- **Detections expire.** A worker posts who it sees about 4 times a second while active; `GET /api/capture/detections` only trusts a camera's last-reported roster for **3 s** past that. A worker that pauses (nobody on the setup screen, no live match) or crashes simply stops posting — without this expiry, whoever it last saw would be reported as present indefinitely, e.g. still showing someone as detected well after they'd stepped away. Bug found live: a worker had gone quiet and the UI kept reporting its last-known player as present with no way to tell the data was stale.
 
 Checked on a real photo: after enrolling one person from a solo shot, the system finds them in a group of six at similarity 0.59, while the five others stay below 0.363 (the closest reached 0.33).
 
@@ -154,7 +156,7 @@ The page has three tabs:
 | `GET /api/matches` | | Every match, newest first, as compact summaries — powers `/matches`. |
 | `DELETE /api/matches/{id}` | | Removes a match — unrates a finished one first (409 if a later match depends on that rating); a live/abandoned one just goes. |
 | `POST /api/capture/detections` | `{camera, player_ids, faces?, threshold?}` | Who camera A/B recognises (smoothed), with per-face evidence. |
-| `GET /api/capture/detections` | | `{A, B}` → `{players, unknown_present}` — the setup screen polls this; `unknown_present` drives its "new face, register?" banner. |
+| `GET /api/capture/detections` | | `{A, B}` → `{players, unknown_present}` — the setup screen polls this; `unknown_present` drives its "new face, register?" banner. Empty once a camera hasn't posted in `DETECTIONS_STALE_S` (3s), not stuck on whoever it last saw. |
 | `POST /api/capture/ticks` | `{ts?, strength?}` | One table contact. |
 | `POST /api/capture/hits` | `{camera, player_id?, ts?, evidence?}` | One swing. |
 | `POST /api/capture/device-params` | `{device, params}` | Thresholds a worker runs with (shown on `/decisions`). |

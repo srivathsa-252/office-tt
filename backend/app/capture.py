@@ -25,6 +25,11 @@ FRAME_STALE_S = 10.0  # a camera counts as live only if it posted a preview fram
 # of polls — 3s was tight enough that this paused the camera mid-registration,
 # silently stalling face-sample accumulation with no visible cause.
 SETUP_HEARTBEAT_STALE_S = 15.0
+# A worker posts detections ~4x/second (--face-every) while active. If it
+# pauses (camera-needed false) or crashes, it simply stops posting — without
+# an expiry, its last-known roster would otherwise be trusted forever, e.g.
+# reporting someone as recognised long after they've left the camera.
+DETECTIONS_STALE_S = 3.0
 
 UNKNOWN = "unknown"
 
@@ -165,12 +170,32 @@ class CaptureHub:
     # Latest per-face evidence a camera reported (spec §3 device API), including
     # faces present but not confirmed to any player — for "new face, register?".
     face_evidence: dict[Side, list[dict]] = field(default_factory=lambda: {Side.A: [], Side.B: []})
+    # When each camera last posted detections — see live_detections/DETECTIONS_STALE_S.
+    detections_seen: dict[Side, float] = field(default_factory=dict)
     # Last time the setup screen polled detections — see SETUP_HEARTBEAT_STALE_S.
     setup_seen: float | None = None
     _next_request: int = 1
 
     def record_frame(self, camera: Side, jpeg: bytes, ts: float) -> None:
         self.frames[camera] = (jpeg, ts)
+
+    def record_detections(
+        self, camera: Side, ids: list[int], evidence: list[dict], ts: float | None = None
+    ) -> None:
+        self.detections[camera] = ids
+        self.face_evidence[camera] = evidence
+        self.detections_seen[camera] = ts if ts is not None else now()
+
+    def live_detections(self, camera: Side) -> tuple[list[int], list[dict]]:
+        """A camera's last-reported roster and per-face evidence — or empty if
+        it hasn't posted in DETECTIONS_STALE_S. A worker that's paused or has
+        crashed simply stops posting; without this, its last-known roster
+        (e.g. "Sri" from minutes ago) would be trusted forever instead of
+        being treated as no-longer-known."""
+        seen = self.detections_seen.get(camera)
+        if seen is None or now() - seen >= DETECTIONS_STALE_S:
+            return [], []
+        return self.detections.get(camera, []), self.face_evidence.get(camera, [])
 
     def camera_status(self) -> dict[Side, dict]:
         status = {}

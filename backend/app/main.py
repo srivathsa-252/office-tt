@@ -383,9 +383,9 @@ def create_app(session_factory: sessionmaker | None = None, init: bool = True) -
         # signal that someone's actively setting up a match (see camera_needed).
         hub.mark_setup_seen()
         out = {}
-        for side, ids in hub.detections.items():
+        for side in (Side.A, Side.B):
+            ids, evidence = hub.live_detections(side)
             players = [db.get(Player, pid) for pid in ids]
-            evidence = hub.face_evidence.get(side, [])
             out[side.value] = {
                 "players": [player_ref(p) for p in players if p is not None],
                 # A face was seen but matched nobody confidently — "new face"
@@ -399,9 +399,8 @@ def create_app(session_factory: sessionmaker | None = None, init: bool = True) -
     def post_detections(body: DetectionsIn, db: Session = Depends(get_db)):
         ids = list(dict.fromkeys(body.player_ids))
         # Logged only when who's recognised changes (it's posted several times a second).
-        changed = set(ids) != set(hub.detections[body.camera])
-        hub.detections[body.camera] = ids
-        hub.face_evidence[body.camera] = [f.model_dump() for f in body.faces]
+        changed = set(ids) != set(hub.detections.get(body.camera, []))
+        hub.record_detections(body.camera, ids, [f.model_dump() for f in body.faces])
         if changed:
             record(db, "face.detections", *explain_detections(db, body), match_id=None)
             db.commit()
