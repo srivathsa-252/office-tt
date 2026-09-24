@@ -89,7 +89,8 @@ The setup screen's Format card is editable: **serves per turn** (3 or 5), **game
 **Registering a new face is scan-first**, not name-first: tapping Register (from the banner, or "Register new face" in the manual picker) opens a wizard — live preview with a scan animation, "Scanned successfully!", *then* it asks for a name, then "Registered successfully!" — matching what actually has to happen physically (the camera needs a clean look at the face regardless of what they're called). This needed a real API change, not just a frontend one: a face is captured *before* any player exists.
 
 - `POST /api/capture/enroll-requests` — `player_id` is now optional. Given, it's the existing "teach this face to an already-known player" flow, unchanged. Omitted, it starts a scan-first request: the camera worker captures 5 samples the same way, then instead of uploading them straight to a player, it calls the new `POST .../{id}/scanned {vectors, evidence}`, which holds them server-side (not the browser) against that request.
-- `GET /api/capture/enroll-requests/{id}` — the frontend polls this (every 500 ms while scanning) for `status`: `pending → scanned → done`, or `failed` with a `reason` (the same specific messages as before: face too small, confidence too low, no face in view, gave up after 15s).
+- **Already registered?** Before accumulating samples, the worker checks whether the one face in view already confidently matches an existing gallery player (a single `recognise()` call, no 15 s wait) and, if so, calls `POST .../{id}/already-known {player_id, similarity}` instead of scanning them in as someone new. The wizard shows "Are you already **&lt;name&gt;**?" — yes assigns that existing player (no duplicate created); no restarts the scan. Verified live: a second scan of an already-registered face resolved in under a second, correctly matched.
+- `GET /api/capture/enroll-requests/{id}` — the frontend polls this (every 500 ms while scanning) for `status`: `pending → scanned → done`, `pending → already_known → done`, or `failed` with a `reason` (the same specific messages as before: face too small, confidence too low, no face in view, gave up after 15s). `matched_player` is set once `already_known`.
 - `POST /api/capture/enroll-requests/{id}/register {name}` — once `status` is `scanned`, creates the player and attaches the already-captured samples in one step. The raw face vectors never round-trip through the browser.
 
 ### Swings and the last hitter
@@ -139,8 +140,8 @@ The page has three tabs:
 | `GET /api/capture/camera-needed` | | `{needed}` — a worker polls this and pauses analysis/preview when false (see "Cameras pause..." above). |
 | `GET /api/face-gallery` · `POST/DELETE /api/players/{id}/faces` | `{vectors, source, request_id?}` | The face gallery. |
 | `POST/GET /api/capture/enroll-requests` | `{camera, player_id?}` | Asks a camera to learn a face — `player_id` given teaches an existing player; omitted starts a scan-first request (see "Match setup" above). |
-| `GET /api/capture/enroll-requests/{id}` | | `{status, reason}` — the setup screen polls this while scanning. |
-| `POST /api/capture/enroll-requests/{id}/scanned` · `…/failed` · `…/register` | `{vectors, evidence}` · `{reason}` · `{name}` | The worker's scan-first terminal steps, and the frontend's name step. |
+| `GET /api/capture/enroll-requests/{id}` | | `{status, reason, matched_player}` — the setup screen polls this while scanning. |
+| `POST /api/capture/enroll-requests/{id}/scanned` · `…/already-known` · `…/failed` · `…/register` | `{vectors, evidence}` · `{player_id, similarity}` · `{reason}` · `{name}` | The worker's scan-first terminal steps, and the frontend's name step. |
 
 `ts` is epoch seconds from the shared clock. When it's omitted, the server's time is used.
 

@@ -31,6 +31,10 @@ KINDS: dict[str, tuple[str, str]] = {
     "face.enroll_failed": ("Enroll failed", "A camera couldn't safely capture the face."),
     "face.enroll_requested": ("Enroll asked", "A manual pick asked the camera to learn a face."),
     "face.scanned": ("Face scanned", "A scan-first enrollment captured samples; waiting for a name."),
+    "face.already_known": (
+        "Already known",
+        "A scan-first request's face already matches an existing player.",
+    ),
     "swing": ("Swing", "A stroke seen by a camera, and who it was attributed to."),
     "device.config": ("Device", "Thresholds a camera or the sensor reported when it started."),
 }

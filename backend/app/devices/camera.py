@@ -33,6 +33,7 @@ from .faces import (
     FaceMatch,
     Gallery,
     Presence,
+    already_known_match,
     pick_unknown_face,
     recognise,
 )
@@ -249,6 +250,19 @@ class CameraWorker:
         s = self.enroll
         if s is None:
             return
+        if s.player_id is None:
+            # Scan-first only: if the one face in view already confidently
+            # matches someone, ask "are you already them?" instead of
+            # scanning them in as a second, separate person.
+            known = already_known_match(matches)
+            if known is not None:
+                self._handled.add(s.request_id)
+                self.api.post_async(
+                    f"/api/capture/enroll-requests/{s.request_id}/already-known",
+                    {"player_id": known.player_id, "similarity": known.similarity},
+                )
+                self.enroll = None
+                return
         m, reason = pick_unknown_face(matches)
         s.last_reason = reason
         if m is not None:

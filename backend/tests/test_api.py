@@ -282,7 +282,14 @@ def test_scan_first_enroll_registers_a_new_player(client):
     rid = r.json()["id"]
 
     status = client.get(f"/api/capture/enroll-requests/{rid}").json()
-    assert status == {"id": rid, "camera": "A", "player_id": None, "status": "pending", "reason": None}
+    assert status == {
+        "id": rid,
+        "camera": "A",
+        "player_id": None,
+        "status": "pending",
+        "reason": None,
+        "matched_player": None,
+    }
 
     r = client.post(
         f"/api/capture/enroll-requests/{rid}/scanned",
@@ -328,6 +335,50 @@ def test_enroll_failed_handles_a_scan_first_request(client):
     assert r.status_code == 204
     status = client.get(f"/api/capture/enroll-requests/{rid}").json()
     assert status["status"] == "failed" and status["reason"] == "no face in view"
+
+
+def test_scan_first_already_known_asks_are_you_them(client):
+    pr = add_players(client, "Praneeth")[0]
+    rid = client.post("/api/capture/enroll-requests", json={"camera": "A"}).json()["id"]
+
+    r = client.post(
+        f"/api/capture/enroll-requests/{rid}/already-known",
+        json={"player_id": pr, "similarity": 0.71},
+    )
+    assert r.status_code == 204
+
+    status = client.get(f"/api/capture/enroll-requests/{rid}").json()
+    assert status["status"] == "already_known"
+    assert status["matched_player"] == {"id": pr, "name": "Praneeth", "initials": "PR"}
+
+    # Terminal: it can't then also be scanned or failed.
+    assert (
+        client.post(
+            f"/api/capture/enroll-requests/{rid}/scanned", json={"vectors": [fake_vector()] * 5}
+        ).status_code
+        == 404
+    )
+
+
+def test_already_known_rejects_a_request_that_already_has_a_player(client):
+    pr, sr = add_players(client, "Praneeth", "Sri")
+    rid = client.post(
+        "/api/capture/enroll-requests", json={"camera": "A", "player_id": pr}
+    ).json()["id"]
+    r = client.post(
+        f"/api/capture/enroll-requests/{rid}/already-known",
+        json={"player_id": sr},
+    )
+    assert r.status_code == 404
+
+
+def test_already_known_requires_a_real_player(client):
+    rid = client.post("/api/capture/enroll-requests", json={"camera": "A"}).json()["id"]
+    r = client.post(
+        f"/api/capture/enroll-requests/{rid}/already-known",
+        json={"player_id": 999999},
+    )
+    assert r.status_code == 404
 
 
 def test_enroll_request_status_404_for_unknown_id(client):

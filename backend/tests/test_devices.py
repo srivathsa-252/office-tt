@@ -10,6 +10,7 @@ from app.devices.faces import (
     FaceMatch,
     Gallery,
     Presence,
+    already_known_match,
     assign,
     pick_unknown_face,
 )
@@ -60,6 +61,15 @@ def test_enroll_only_with_exactly_one_good_unknown_face():
     assert "px" in pick_unknown_face([match(None, size=ENROLL_MIN_SIZE_PX - 1)])[1]
     m, why = pick_unknown_face([match(1), match(None)])
     assert m is not None and why.startswith("exactly one")
+
+
+def test_already_known_match_needs_exactly_one_recognised_face():
+    assert already_known_match([]) is None
+    assert already_known_match([match(None)]) is None  # unrecognised, not "already known"
+    assert already_known_match([match(1), match(None)]) is None  # more than one face in view
+    assert already_known_match([match(1), match(2)]) is None
+    m = already_known_match([match(1)])
+    assert m is not None and m.player_id == 1
 
 
 # -- swing ---------------------------------------------------------------------

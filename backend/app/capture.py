@@ -59,11 +59,16 @@ class EnrollRequest:
     # attach it to a brand-new player once one is given (see /register below).
     player_id: int | None
     created: float
-    status: str = "pending"  # pending | scanned | done | failed
+    status: str = "pending"  # pending | scanned | already_known | done | failed
     # Set once status is "scanned": the captured, not-yet-attached samples.
     vectors: list[list[float]] | None = None
     evidence: dict | None = None
     last_reason: str | None = None  # set on failure, for the UI to show why
+    # Set once status is "already_known": a scan-first request found the face
+    # already confidently matches this existing player — the UI asks "are you
+    # already them?" instead of scanning them in as a brand-new person.
+    matched_player_id: int | None = None
+    matched_similarity: float | None = None
 
 
 @dataclass
@@ -207,6 +212,16 @@ class CaptureHub:
             req.status = "scanned"
             req.vectors = vectors
             req.evidence = evidence
+        return req
+
+    def mark_already_known(
+        self, rid: int, player_id: int, similarity: float | None
+    ) -> EnrollRequest | None:
+        req = self.enroll_request(rid)
+        if req is not None:
+            req.status = "already_known"
+            req.matched_player_id = player_id
+            req.matched_similarity = similarity
         return req
 
 

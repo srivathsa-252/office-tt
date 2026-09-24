@@ -137,6 +137,11 @@ class EnrollScannedIn(BaseModel):
     evidence: dict = {}
 
 
+class EnrollAlreadyKnownIn(BaseModel):
+    player_id: int
+    similarity: float | None = None
+
+
 class EnrollRegisterIn(BaseModel):
     name: str = Field(min_length=1, max_length=80)
 
@@ -493,16 +498,18 @@ def create_app(session_factory: sessionmaker | None = None, init: bool = True) -
         ]
 
     @app.get("/api/capture/enroll-requests/{rid}")
-    def enroll_request_status(rid: int):
+    def enroll_request_status(rid: int, db: Session = Depends(get_db)):
         req = hub.enroll_request(rid)
         if req is None:
             raise HTTPException(404, "no such request")
+        matched = db.get(Player, req.matched_player_id) if req.matched_player_id else None
         return {
             "id": req.id,
             "camera": req.camera.value,
             "player_id": req.player_id,
             "status": req.status,
             "reason": req.last_reason,
+            "matched_player": player_ref(matched) if matched else None,
         }
 
     @app.post("/api/capture/enroll-requests/{rid}/failed", status_code=204)
@@ -539,6 +546,28 @@ def create_app(session_factory: sessionmaker | None = None, init: bool = True) -
             f"Camera {req.camera.value} finished scanning a new face ({len(vectors)} "
             "sample(s)) — waiting for a name.",
             {"request_id": rid, **body.evidence},
+        )
+        db.commit()
+
+    @app.post("/api/capture/enroll-requests/{rid}/already-known", status_code=204)
+    def enroll_already_known(rid: int, body: EnrollAlreadyKnownIn, db: Session = Depends(get_db)):
+        # The camera worker's fast path for a scan-first request: the one face
+        # in view already confidently matches an existing player, so ask "are
+        # you already them?" instead of scanning them in as someone new.
+        req = hub.enroll_request(rid)
+        if req is None or req.status != "pending" or req.player_id is not None:
+            raise HTTPException(404, "no such pending scan-first request")
+        player = db.get(Player, body.player_id)
+        if player is None:
+            raise HTTPException(404, "player not found")
+        hub.mark_already_known(rid, body.player_id, body.similarity)
+        sim = f" (similarity {body.similarity:.2f})" if body.similarity is not None else ""
+        record(
+            db,
+            "face.already_known",
+            f"Camera {req.camera.value}'s scan already matches {player.name}{sim} — asking "
+            "whether that's who this is, instead of scanning them in as someone new.",
+            {"request_id": rid, "player_id": body.player_id, "similarity": body.similarity},
         )
         db.commit()
 

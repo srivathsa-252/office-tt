@@ -4,7 +4,7 @@ import { Avatar } from "./Avatar";
 import { C, SIDE, type SideKey } from "../theme";
 import type { PlayerRef } from "../types";
 
-type Phase = "scanning" | "scanned" | "naming" | "registering" | "done" | "failed";
+type Phase = "scanning" | "scanned" | "already_known" | "naming" | "registering" | "done" | "failed";
 
 const POLL_MS = 500;
 const CLIENT_TIMEOUT_S = 20;
@@ -27,6 +27,8 @@ export function RegisterFaceWizard({
   const [failReason, setFailReason] = useState<string | null>(null);
   const [name, setName] = useState("");
   const [registeredPlayer, setRegisteredPlayer] = useState<PlayerRef | null>(null);
+  const [matchedPlayer, setMatchedPlayer] = useState<PlayerRef | null>(null);
+  const [wasAlreadyKnown, setWasAlreadyKnown] = useState(false);
   const nameInput = useRef<HTMLInputElement>(null);
   const startedAt = useRef(Date.now());
   const color = SIDE[camera].color;
@@ -34,6 +36,8 @@ export function RegisterFaceWizard({
   const beginScan = () => {
     setFailReason(null);
     setRequestId(null);
+    setMatchedPlayer(null);
+    setWasAlreadyKnown(false);
     setPhase("scanning");
     startedAt.current = Date.now();
     api.startScan(camera).then(
@@ -61,6 +65,9 @@ export function RegisterFaceWizard({
           if (!alive) return;
           if (s.status === "scanned") {
             setPhase("scanned");
+          } else if (s.status === "already_known") {
+            setMatchedPlayer(s.matched_player);
+            setPhase("already_known");
           } else if (s.status === "failed") {
             setFailReason(s.reason);
             setPhase("failed");
@@ -103,6 +110,14 @@ export function RegisterFaceWizard({
       setFailReason((e as Error).message);
       setPhase("failed");
     }
+  };
+
+  const confirmMatch = () => {
+    if (!matchedPlayer) return;
+    setRegisteredPlayer(matchedPlayer);
+    setWasAlreadyKnown(true);
+    setPhase("done");
+    window.setTimeout(() => onDone(matchedPlayer), 900);
   };
 
   return (
@@ -173,6 +188,50 @@ export function RegisterFaceWizard({
           <SuccessLine color={C.lime}>Scanned successfully!</SuccessLine>
         )}
 
+        {phase === "already_known" && matchedPlayer && (
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 14 }}>
+            <Avatar player={matchedPlayer} size={56} fontSize={20} background={color} color={C.bg} />
+            <div style={{ textAlign: "center", fontSize: 15, fontWeight: 700 }}>
+              Are you already <span style={{ color }}>{matchedPlayer.name}</span>?
+            </div>
+            <div style={{ textAlign: "center", fontSize: 12, color: C.subtle }}>
+              This face already matches a player in the gallery.
+            </div>
+            <div style={{ display: "flex", gap: 10, width: "100%" }}>
+              <button
+                onClick={beginScan}
+                style={{
+                  flex: 1,
+                  padding: "12px 0",
+                  border: `1.5px solid ${C.border}`,
+                  borderRadius: 12,
+                  background: "transparent",
+                  color: C.text,
+                  fontSize: 14,
+                  fontWeight: 700,
+                }}
+              >
+                No, that&apos;s not me
+              </button>
+              <button
+                onClick={confirmMatch}
+                style={{
+                  flex: 1,
+                  padding: "12px 0",
+                  border: "none",
+                  borderRadius: 12,
+                  background: C.lime,
+                  color: C.bg,
+                  fontSize: 14,
+                  fontWeight: 800,
+                }}
+              >
+                Yes, that&apos;s me
+              </button>
+            </div>
+          </div>
+        )}
+
         {phase === "naming" && (
           <form
             onSubmit={(e) => {
@@ -240,7 +299,11 @@ export function RegisterFaceWizard({
             }}
           >
             <Avatar player={registeredPlayer} size={64} fontSize={22} background={C.lime} color={C.bg} />
-            <SuccessLine color={C.lime}>{registeredPlayer.name} registered successfully!</SuccessLine>
+            <SuccessLine color={C.lime}>
+              {wasAlreadyKnown
+                ? `Welcome back, ${registeredPlayer.name}!`
+                : `${registeredPlayer.name} registered successfully!`}
+            </SuccessLine>
           </div>
         )}
 

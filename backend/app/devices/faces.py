@@ -166,6 +166,15 @@ class Presence:
         return f"{self.count(pid)}/{len(self.history)}"
 
 
+def already_known_match(matches: list[FaceMatch]) -> FaceMatch | None:
+    """The one face in view, if it's already confidently matched to an
+    existing player — so a scan-first registration can ask 'are you already
+    them?' instead of scanning them in as a second, separate person."""
+    if len(matches) == 1 and matches[0].player_id is not None:
+        return matches[0]
+    return None
+
+
 def pick_unknown_face(matches: list[FaceMatch]) -> tuple[FaceMatch | None, str]:
     """The one face that's safe to enrol, or why there isn't one."""
     unknown = [m for m in matches if m.player_id is None]

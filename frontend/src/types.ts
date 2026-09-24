@@ -65,8 +65,9 @@ export interface EnrollStatus {
   id: number;
   camera: SideKey;
   player_id: number | null;
-  status: "pending" | "scanned" | "done" | "failed";
+  status: "pending" | "scanned" | "already_known" | "done" | "failed";
   reason: string | null;
+  matched_player: PlayerRef | null;
 }
 
 export interface Synergy {
