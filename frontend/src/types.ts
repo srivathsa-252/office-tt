@@ -11,6 +11,21 @@ export interface HitRef {
   player: PlayerRef | null;
 }
 
+export interface MatchSummary {
+  id: number;
+  mode: "singles" | "doubles";
+  status: "live" | "finished" | "abandoned";
+  side_a: PlayerRef[];
+  side_b: PlayerRef[];
+  best_of: number;
+  winner: SideKey | null;
+  game_scores: Record<SideKey, number>[] | null;
+  games_won: Record<SideKey, number> | null;
+  points_played: number;
+  created_at: string;
+  closed_at: string | null;
+}
+
 export interface Format {
   points_to_win: number;
   win_margin: number;

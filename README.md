@@ -93,6 +93,8 @@ The setup screen's Format card is editable: **serves per turn** (3 or 5), **game
 - `GET /api/capture/enroll-requests/{id}` — the frontend polls this (every 500 ms while scanning) for `status`: `pending → scanned → done`, `pending → already_known → done`, or `failed` with a `reason` (the same specific messages as before: face too small, confidence too low, no face in view, gave up after 15s). `matched_player` is set once `already_known`.
 - `POST /api/capture/enroll-requests/{id}/register {name}` — once `status` is `scanned`, creates the player and attaches the already-captured samples in one step. The raw face vectors never round-trip through the browser.
 
+**Frame guide, not full frame.** The scan wizard's preview no longer treats the whole camera view as "in frame" — it overlays a small centred oval (42% of the preview's width, portrait 3:4) and dims everything outside it, with "Come into frame — fill the oval with your face" shown until a scan lands. Framing only counts once the face actually fills that oval, not just appears somewhere in a wide shot — matching what `ENROLL_MIN_SIZE_PX` actually requires to accept a sample.
+
 ### Player directory (`/players`)
 
 Every enrollment success (scan-first register, or teaching an existing player's face) also crops and saves a small JPEG around the detected face box (`devices/camera.crop_face_jpeg`, `Player.face_photo`) — a snapshot from the moment it was last recognised and enrolled, not a live view. `GET /api/players/{id}/photo` serves it, or 404 if there isn't one yet; both `/players` and a player's own page fall back to the initials avatar until there is.
@@ -100,6 +102,13 @@ Every enrollment success (scan-first register, or teaching an existing player's 
 **Deleting.** A player page has a Danger zone with two separate actions:
 - **Delete face data** — `DELETE /api/players/{id}/faces`, unchanged, now also clears `face_photo` (the photo belongs to the face data, so wiping one wipes both). They'll need to register again before a camera recognises them.
 - **Delete player** — new `DELETE /api/players/{id}`. Refused (409) if they've appeared in any match, live, finished or abandoned — deleting them would break that match's own player references and, for a finished one, everyone else's history. Only ever removes a player who's never actually played.
+
+### Match directory (`/matches`)
+
+Lists every match ever created, newest first, with both sides' names (coloured by who won), mode, status, best-of, and a result summary — final game score for a single-game match, games won for best-of-N, or "N pt(s) so far" while it's still live. Cross-linked with `/players`.
+
+- `GET /api/matches` — the full list, each row a compact summary (`side_a`/`side_b` as `PlayerRef`s, `games_won`, `points_played`, `created_at`/`closed_at`). Separate from `GET /api/matches/{id}`, which returns full live state for one match.
+- `DELETE /api/matches/{id}` — each row has a delete button, confirm-guarded (the confirmation text differs for a live vs. a finished match). A **finished** match is unrated first — the same reversal `unrate_match` already does for undo — before being removed, so ratings stay correct; refused with **409** if a later match's rating already depends on this one (same refusal undo already gives, reused rather than re-implemented). A **live** or **abandoned** match is just removed, nothing to unrate. Either way its points cascade-delete with it, and its decision-log entries are removed too so nothing dangling references the deleted id.
 
 ### Swings and the last hitter
 
@@ -136,6 +145,8 @@ The page has three tabs:
 
 | Endpoint | Body | Used for |
 |---|---|---|
+| `GET /api/matches` | | Every match, newest first, as compact summaries — powers `/matches`. |
+| `DELETE /api/matches/{id}` | | Removes a match — unrates a finished one first (409 if a later match depends on that rating); a live/abandoned one just goes. |
 | `POST /api/capture/detections` | `{camera, player_ids, faces?, threshold?}` | Who camera A/B recognises (smoothed), with per-face evidence. |
 | `GET /api/capture/detections` | | `{A, B}` → `{players, unknown_present}` — the setup screen polls this; `unknown_present` drives its "new face, register?" banner. |
 | `POST /api/capture/ticks` | `{ts?, strength?}` | One table contact. |

@@ -460,6 +460,64 @@ def test_enroll_request_status_404_for_unknown_id(client):
     assert client.get("/api/capture/enroll-requests/999999").status_code == 404
 
 
+def test_list_matches_returns_all_newest_first_with_summary(client):
+    pr, sr = add_players(client, "Praneeth", "Sri")
+    m1 = singles(client, pr, sr)
+    win(client, m1["id"], "A", MERCY_SHUTOUT_AT)  # finished
+    m2 = singles(client, pr, sr)  # live
+
+    rows = client.get("/api/matches").json()
+    assert [r["id"] for r in rows] == [m2["id"], m1["id"]]
+
+    finished = next(r for r in rows if r["id"] == m1["id"])
+    assert finished["status"] == "finished"
+    assert finished["winner"] == "A"
+    assert finished["side_a"] == [{"id": pr, "name": "Praneeth", "initials": "PR"}]
+    assert finished["games_won"] == {"A": 1, "B": 0}
+    assert finished["closed_at"] is not None
+
+    live = next(r for r in rows if r["id"] == m2["id"])
+    assert live["status"] == "live" and live["games_won"] is None and live["closed_at"] is None
+
+
+def test_delete_finished_match_reverts_rating_and_removes_it(client):
+    pr, sr = add_players(client, "Praneeth", "Sri")
+    m = singles(client, pr, sr)
+    win(client, m["id"], "A", MERCY_SHUTOUT_AT)
+    assert client.get(f"/api/players/{pr}/stats").json()["rating"] != 1500
+
+    assert client.delete(f"/api/matches/{m['id']}").status_code == 204
+
+    assert client.get(f"/api/matches/{m['id']}").status_code == 404
+    assert client.get(f"/api/players/{pr}/stats").json()["rating"] == 1500
+    assert m["id"] not in [r["id"] for r in client.get("/api/matches").json()]
+
+
+def test_delete_match_refused_if_a_later_match_already_rated(client):
+    pr, sr = add_players(client, "Praneeth", "Sri")
+    m1 = singles(client, pr, sr)
+    win(client, m1["id"], "A", MERCY_SHUTOUT_AT)
+    m2 = singles(client, pr, sr)
+    win(client, m2["id"], "A", MERCY_SHUTOUT_AT)
+
+    r = client.delete(f"/api/matches/{m1['id']}")
+    assert r.status_code == 409
+    assert client.get(f"/api/matches/{m1['id']}").status_code == 200  # untouched
+
+
+def test_delete_live_match_just_removes_it(client):
+    pr, sr = add_players(client, "Praneeth", "Sri")
+    m = singles(client, pr, sr)
+    win(client, m["id"], "A", 2)  # a few points, still live
+    assert client.delete(f"/api/matches/{m['id']}").status_code == 204
+    assert client.get(f"/api/matches/{m['id']}").status_code == 404
+    assert client.get(f"/api/players/{pr}/stats").json()["rating"] == 1500
+
+
+def test_delete_match_404_for_unknown_id(client):
+    assert client.delete("/api/matches/999999").status_code == 404
+
+
 @pytest.mark.parametrize(
     "body",
     [

@@ -5,6 +5,7 @@ import type {
   EnrollStatus,
   Format,
   MatchState,
+  MatchSummary,
   PlayerRef,
   PlayerStats,
   WinType,
@@ -46,6 +47,8 @@ export const api = {
   streamUrl: (camera: SideKey) => `/api/capture/stream/${camera}`,
   liveMatch: () => req<MatchState>("GET", "/api/matches/live"),
   match: (id: number) => req<MatchState>("GET", `/api/matches/${id}`),
+  matches: () => req<MatchSummary[]>("GET", "/api/matches"),
+  deleteMatch: (id: number) => req<void>("DELETE", `/api/matches/${id}`),
   createMatch: (body: {
     mode: "singles" | "doubles";
     side_a: number[];

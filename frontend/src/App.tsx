@@ -2,6 +2,7 @@ import { useEffect } from "react";
 import { BrowserRouter, Route, Routes, useNavigate } from "react-router-dom";
 import { api } from "./api";
 import { LiveScoreboard } from "./screens/LiveScoreboard";
+import { MatchesList } from "./screens/MatchesList";
 import { MatchSetup } from "./screens/MatchSetup";
 import { PlayerStats } from "./screens/PlayerStats";
 import { PlayersList } from "./screens/PlayersList";
@@ -27,6 +28,7 @@ export function App() {
         <Route path="/live/:matchId" element={<LiveScoreboard />} />
         <Route path="/players" element={<PlayersList />} />
         <Route path="/players/:playerId" element={<PlayerStats />} />
+        <Route path="/matches" element={<MatchesList />} />
       </Routes>
     </BrowserRouter>
   );

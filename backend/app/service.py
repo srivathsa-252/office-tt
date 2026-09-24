@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from . import glicko2
 from .capture import UNKNOWN, CaptureHub, Hit
 from .decisions import explain_game, explain_rally, explain_serve, record
-from .models import Match, Pair, Player, Point, RatingHistory, utcnow
+from .models import Decision, Match, Pair, Player, Point, RatingHistory, utcnow
 from .rules import Format, MatchEngine, Mode, Side
 
 WIN_TYPES = ("smash", "fault", "net", "out")
@@ -377,6 +377,27 @@ def unrate_match(db: Session, match: Match) -> None:
             row.volatility_before,
         )
         db.delete(row)
+
+
+def delete_match(db: Session, match: Match) -> None:
+    """Permanently remove a match — from the matches list's Danger zone, one
+    at a time. A finished match is unrated first (same reversal as undo, and
+    the same refusal if a later match already depends on that rating), so
+    ratings stay correct. Its points cascade-delete with it; its decision log
+    entries are removed too, so nothing dangling references the deleted id."""
+    if match.status == "finished":
+        unrate_match(db, match)  # raises ConflictError if a later match relies on this rating
+    points_played = len(match.points)
+    db.query(Decision).filter_by(match_id=match.id).delete()
+    record(
+        db,
+        "match.deleted",
+        f"Match #{match.id} ({match.mode}, {match.status}, {points_played} point(s)) was "
+        "deleted from the matches list, along with its decision log.",
+        {"match_id": match.id, "mode": match.mode, "status": match.status, "points": points_played},
+    )
+    db.delete(match)
+    db.commit()
 
 
 # -- live state pushed to the scoreboard ------------------------------------

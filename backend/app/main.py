@@ -28,6 +28,7 @@ from .rules import Format, Mode, Side
 from .service import (
     ConflictError,
     create_match,
+    delete_match,
     end_match,
     live_match,
     match_state,
@@ -251,6 +252,41 @@ def create_app(session_factory: sessionmaker | None = None, init: bool = True) -
 
     # -- matches -----------------------------------------------------------
 
+    @app.get("/api/matches")
+    def list_matches(db: Session = Depends(get_db)):
+        matches = db.scalars(select(Match).order_by(Match.id.desc())).all()
+        ids = {pid for m in matches for pid in m.side_a_players + m.side_b_players}
+        players = {p.id: p for p in db.scalars(select(Player).where(Player.id.in_(ids)))} if ids else {}
+
+        def side(ids_: list[int]) -> list[dict]:
+            return [player_ref(players[pid]) for pid in ids_ if pid in players]
+
+        def games_won(m: Match) -> dict | None:
+            if not m.game_scores:
+                return None
+            return {
+                "A": sum(g["A"] > g["B"] for g in m.game_scores),
+                "B": sum(g["B"] > g["A"] for g in m.game_scores),
+            }
+
+        return [
+            {
+                "id": m.id,
+                "mode": m.mode,
+                "status": m.status,
+                "side_a": side(m.side_a_players),
+                "side_b": side(m.side_b_players),
+                "best_of": m.format.get("best_of"),
+                "winner": m.winner,
+                "game_scores": m.game_scores,
+                "games_won": games_won(m),
+                "points_played": len(m.points),
+                "created_at": m.created_at.isoformat(),
+                "closed_at": m.closed_at.isoformat() if m.closed_at else None,
+            }
+            for m in matches
+        ]
+
     @app.post("/api/matches", status_code=201)
     async def new_match(body: MatchIn, db: Session = Depends(get_db)):
         if body.format.best_of % 2 == 0:
@@ -311,6 +347,15 @@ def create_app(session_factory: sessionmaker | None = None, init: bool = True) -
             except ConflictError as e:
                 raise HTTPException(409, str(e))
             return await broadcast(db, match)
+
+    @app.delete("/api/matches/{match_id}", status_code=204)
+    async def delete_match_route(match_id: int, db: Session = Depends(get_db)):
+        async with lock:
+            match = get_match(db, match_id)
+            try:
+                delete_match(db, match)
+            except ConflictError as e:
+                raise HTTPException(409, str(e))
 
     @app.websocket("/ws/matches/{match_id}")
     async def match_ws(ws: WebSocket, match_id: int):

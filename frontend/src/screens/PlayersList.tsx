@@ -28,13 +28,19 @@ export function PlayersList() {
   return (
     <div style={{ minHeight: "100%", background: C.bg, color: C.text }}>
       <div style={{ maxWidth: 1100, margin: "0 auto", padding: "24px 20px 48px", boxSizing: "border-box" }}>
-        <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginBottom: 20 }}>
+        <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginBottom: 20, flexWrap: "wrap" }}>
           <h1 style={{ margin: 0, fontSize: 26, fontWeight: 800 }}>Players</h1>
           {rows && (
             <div style={{ fontSize: 13, color: C.subtle }}>
               {rows.length} {rows.length === 1 ? "player" : "players"}
             </div>
           )}
+          <Link
+            to="/matches"
+            style={{ marginLeft: "auto", fontSize: 13, color: C.faint, fontWeight: 600, textDecoration: "none" }}
+          >
+            Matches &rarr;
+          </Link>
         </div>
 
         {error && <div style={{ color: C.coral, fontWeight: 700 }}>{error}</div>}

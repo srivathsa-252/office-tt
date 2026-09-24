@@ -351,6 +351,13 @@ export function RegisterFaceWizard({
   );
 }
 
+// The guide oval, as a fraction of the preview box — deliberately small, so
+// framing only counts if the face actually fills it (not "somewhere in a
+// wide shot"), which is what the low-confidence scan failures were really
+// asking for.
+const GUIDE_WIDTH_PCT = 42;
+const GUIDE_ASPECT = 3 / 4; // portrait, head-and-shoulders
+
 function ScanPreview({
   camera,
   scanned,
@@ -375,68 +382,88 @@ function ScanPreview({
       }}
     >
       <img
-        src={api.streamUrl(camera)}
-        alt={`Live preview from camera ${camera}`}
-        onLoad={() => setOk(true)}
-        onError={() => setOk(false)}
-        style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
-      />
-      {!ok && (
+          src={api.streamUrl(camera)}
+          alt={`Live preview from camera ${camera}`}
+          onLoad={() => setOk(true)}
+          onError={() => setOk(false)}
+          style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }}
+        />
+        {!ok && (
+          <div
+            style={{
+              position: "absolute",
+              inset: 0,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              color: C.faint,
+              fontSize: 12,
+              background: "rgba(0,0,0,0.6)",
+            }}
+          >
+            No camera feed
+          </div>
+        )}
+        {/* Only this smaller centered oval is "the frame" — everything
+         * outside it is dimmed, instead of treating the camera's whole wide
+         * field of view as usable space. */}
         <div
           style={{
             position: "absolute",
-            inset: 0,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            color: C.faint,
-            fontSize: 12,
-            background: "rgba(0,0,0,0.6)",
+            left: "50%",
+            top: "50%",
+            width: `${GUIDE_WIDTH_PCT}%`,
+            aspectRatio: `${GUIDE_ASPECT}`,
+            transform: "translate(-50%,-50%)",
+            borderRadius: "50%",
+            boxShadow: "0 0 0 9999px rgba(0,0,0,0.6)",
+            border: `2px dashed ${scanned ? C.lime : color}`,
+            opacity: scanned ? 1 : 0.85,
+            animation: scanned ? undefined : "tt-scan-pulse 1.8s ease-in-out infinite",
           }}
-        >
-          No camera feed
-        </div>
-      )}
-      {!scanned && (
-        <>
+        />
+        {!scanned && (
           <div
             style={{
               position: "absolute",
-              inset: 10,
-              border: `1.5px dashed ${color}`,
-              borderRadius: 10,
-              opacity: 0.6,
-              animation: "tt-scan-pulse 1.8s ease-in-out infinite",
-            }}
-          />
-          <div
-            style={{
-              position: "absolute",
-              left: 0,
-              right: 0,
+              left: "27%",
+              right: "27%",
               height: 3,
               background: `linear-gradient(90deg, transparent, ${color}, transparent)`,
               boxShadow: `0 0 14px 2px ${color}`,
               animation: "tt-scan-sweep 1.8s ease-in-out infinite",
             }}
           />
-        </>
-      )}
-      {scanned && (
+        )}
         <div
           style={{
             position: "absolute",
-            inset: 0,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            background: "rgba(200,255,77,0.18)",
-            animation: "tt-pop-in 0.25s ease",
+            left: 0,
+            right: 0,
+            bottom: 10,
+            textAlign: "center",
+            fontSize: 11,
+            fontWeight: 700,
+            color: "#fff",
+            textShadow: "0 1px 3px rgba(0,0,0,0.85)",
           }}
         >
-          <CheckBadge color={C.lime} size={52} />
+          {scanned ? "Got it!" : "Come into frame — fill the oval with your face"}
         </div>
-      )}
+        {scanned && (
+          <div
+            style={{
+              position: "absolute",
+              inset: 0,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              animation: "tt-pop-in 0.25s ease",
+            }}
+          >
+            <CheckBadge color={C.lime} size={52} />
+          </div>
+        )}
     </div>
   );
 }
