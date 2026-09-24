@@ -406,7 +406,12 @@ function ScanPreview({
         )}
         {/* Only this smaller centered oval is "the frame" — everything
          * outside it is dimmed, instead of treating the camera's whole wide
-         * field of view as usable space. */}
+         * field of view as usable space. Centering (translate(-50%,-50%))
+         * and the pulse animation (transform: scale(...)) live on separate
+         * nested elements — an animation's transform keyframes replace the
+         * element's whole transform for as long as it runs, so putting both
+         * on one element silently drops the centering the instant the pulse
+         * starts, pushing the oval off toward the bottom-right. */}
         <div
           style={{
             position: "absolute",
@@ -415,13 +420,20 @@ function ScanPreview({
             width: `${GUIDE_WIDTH_PCT}%`,
             aspectRatio: `${GUIDE_ASPECT}`,
             transform: "translate(-50%,-50%)",
-            borderRadius: "50%",
-            boxShadow: "0 0 0 9999px rgba(0,0,0,0.6)",
-            border: `2px dashed ${scanned ? C.lime : color}`,
-            opacity: scanned ? 1 : 0.85,
-            animation: scanned ? undefined : "tt-scan-pulse 1.8s ease-in-out infinite",
           }}
-        />
+        >
+          <div
+            style={{
+              width: "100%",
+              height: "100%",
+              borderRadius: "50%",
+              boxShadow: "0 0 0 9999px rgba(0,0,0,0.6)",
+              border: `2px dashed ${scanned ? C.lime : color}`,
+              opacity: scanned ? 1 : 0.85,
+              animation: scanned ? undefined : "tt-scan-pulse 1.8s ease-in-out infinite",
+            }}
+          />
+        </div>
         {!scanned && (
           <div
             style={{
