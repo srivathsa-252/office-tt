@@ -4,6 +4,7 @@ import { api } from "../api";
 import { Avatar, CheckIcon } from "../components/Avatar";
 import { CameraPreviewPanel, CamerasToggle, useCameraStatus } from "../components/CameraPreview";
 import { RegisterFaceWizard } from "../components/RegisterFace";
+import { flip, loadCameraSwap, saveCameraSwap } from "../cameraMapping";
 import { C, SIDE, type SideKey } from "../theme";
 import type { Detections, Format, PlayerRef } from "../types";
 
@@ -44,6 +45,9 @@ export function MatchSetup() {
   const [mode, setMode] = useState<Mode>("doubles");
   const [format, setFormat] = useState<Format | null>(null);
   const [cameraCount, setCameraCount] = useState<1 | 2>(loadCameraCount);
+  // Which physical camera is mounted at which end — swappable because the
+  // wiring, not the app, decides that, and it's easy to get backwards.
+  const [swapped, setSwapped] = useState<boolean>(loadCameraSwap);
   const [detected, setDetected] = useState<Detections>(NO_DETECTIONS);
   // Manual picks, per side and slot index — the fallback when face-rec can't see someone.
   const [manual, setManual] = useState<Record<SideKey, (PlayerRef | null)[]>>({ A: [], B: [] });
@@ -62,6 +66,10 @@ export function MatchSetup() {
   useEffect(() => {
     localStorage.setItem(CAMERA_COUNT_KEY, String(cameraCount));
   }, [cameraCount]);
+
+  useEffect(() => {
+    saveCameraSwap(swapped);
+  }, [swapped]);
 
   useEffect(() => {
     localStorage.setItem(SHOW_CAMERAS_KEY, showCameras ? "1" : "0");
@@ -85,7 +93,9 @@ export function MatchSetup() {
 
   // In 1-camera mode there's only camera A: both sides draw from its
   // detections, and the person is assigned to whichever side still needs one.
-  const cameraFor = (side: SideKey): SideKey => (cameraCount === 1 ? "A" : side);
+  // Otherwise it's whichever camera is physically mounted at that end —
+  // swappable, since that's a wiring fact the app can't see.
+  const cameraFor = (side: SideKey): SideKey => (cameraCount === 1 ? "A" : flip(side, swapped));
 
   const slots = useMemo(() => {
     const manualIds = new Set(
@@ -252,14 +262,39 @@ export function MatchSetup() {
             const opts = serveOptions(side);
             return (
               <div key={side} style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                   <div
                     style={{ width: 8, height: 8, borderRadius: "50%", background: SIDE[side].color }}
                   />
                   <div style={{ fontSize: 13, fontWeight: 700, letterSpacing: 0.3, color: C.muted }}>
-                    CAMERA {cameraFor(side)}
-                    {cameraCount === 1 ? " (shared)" : ""} &middot; SIDE {side}
+                    SIDE {side}
                   </div>
+                  {cameraCount === 1 ? (
+                    <div style={{ fontSize: 12, color: C.faint }}>Camera A (shared)</div>
+                  ) : (
+                    <select
+                      aria-label={`Camera feeding Side ${side}`}
+                      value={cameraFor(side)}
+                      onChange={(e) => setSwapped(e.target.value !== side)}
+                      style={{
+                        fontSize: 12,
+                        fontWeight: 600,
+                        color: C.text,
+                        background: C.surfaceRaised,
+                        border: `1px solid ${C.border}`,
+                        borderRadius: 8,
+                        padding: "4px 8px",
+                      }}
+                    >
+                      <option value="A">Camera A</option>
+                      <option value="B">Camera B</option>
+                    </select>
+                  )}
+                  {cameraStatus?.[cameraFor(side)]?.source && (
+                    <div className="mono" style={{ fontSize: 11, color: C.faint }}>
+                      device {cameraStatus[cameraFor(side)]!.source}
+                    </div>
+                  )}
                 </div>
                 <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
                   {slots[side].map((slot, i) => (

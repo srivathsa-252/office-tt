@@ -185,7 +185,7 @@ export function CameraPreviewPanel({
         }}
       >
         {feeds.length > 0 ? (
-          feeds.map((side) => <CameraFeed key={side} side={side} />)
+          feeds.map((side) => <CameraFeed key={side} side={side} source={status?.[side]?.source ?? null} />)
         ) : (
           <div
             style={{
@@ -231,7 +231,7 @@ export function CameraPreviewPanel({
   );
 }
 
-export function CameraFeed({ side }: { side: SideKey }) {
+export function CameraFeed({ side, source }: { side: SideKey; source?: string | null }) {
   const [ok, setOk] = useState(true);
   return (
     <div
@@ -254,9 +254,17 @@ export function CameraFeed({ side }: { side: SideKey }) {
           fontWeight: 800,
           letterSpacing: 1.5,
           color: SIDE[side].color,
+          display: "flex",
+          alignItems: "baseline",
+          gap: 8,
         }}
       >
         CAMERA {side}
+        {source && (
+          <span style={{ fontSize: 10, fontWeight: 600, letterSpacing: 0.5, color: C.faint }}>
+            device {source}
+          </span>
+        )}
       </div>
       <div style={{ flexGrow: 1, position: "relative", background: "#000", minHeight: 160 }}>
         <img

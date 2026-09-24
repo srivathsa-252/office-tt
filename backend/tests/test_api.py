@@ -260,8 +260,8 @@ def test_camera_status_reflects_which_cameras_are_posting(client):
     import base64
 
     status = client.get("/api/capture/camera-status").json()
-    assert status["A"] == {"active": False, "last_seen": None}
-    assert status["B"] == {"active": False, "last_seen": None}
+    assert status["A"] == {"active": False, "last_seen": None, "source": None}
+    assert status["B"] == {"active": False, "last_seen": None, "source": None}
 
     client.post(
         "/api/capture/frames",
@@ -270,6 +270,16 @@ def test_camera_status_reflects_which_cameras_are_posting(client):
     status = client.get("/api/capture/camera-status").json()
     assert status["A"]["active"] is True and status["A"]["last_seen"] is not None
     assert status["B"]["active"] is False
+
+
+def test_camera_status_reports_the_device_each_worker_was_started_with(client):
+    client.post(
+        "/api/capture/device-params",
+        json={"device": "camera A", "params": {"source": "0", "face_match_threshold": 0.363}},
+    )
+    status = client.get("/api/capture/camera-status").json()
+    assert status["A"]["source"] == "0"
+    assert status["B"]["source"] is None
 
 
 def fake_vector(seed: float = 1.0) -> list[float]:

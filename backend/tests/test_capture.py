@@ -38,8 +38,8 @@ def test_unidentified_swing_stays_unknown():
 
 def test_camera_status_starts_inactive_with_no_frames():
     status = CaptureHub().camera_status()
-    assert status[Side.A] == {"active": False, "last_seen": None}
-    assert status[Side.B] == {"active": False, "last_seen": None}
+    assert status[Side.A] == {"active": False, "last_seen": None, "source": None}
+    assert status[Side.B] == {"active": False, "last_seen": None, "source": None}
 
 
 def test_camera_status_active_only_while_recent():

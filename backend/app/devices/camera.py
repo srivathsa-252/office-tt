@@ -380,6 +380,7 @@ class CameraWorker:
             {
                 "device": f"camera {self.side}",
                 "params": {
+                    "source": str(a.device),
                     "face_match_threshold": a.match_threshold,
                     "face_presence": f"{PRESENCE_MIN} of last {PRESENCE_WINDOW} checks",
                     "face_check_every_s": a.face_every,

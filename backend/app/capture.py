@@ -177,9 +177,11 @@ class CaptureHub:
         for side in (Side.A, Side.B):
             frame = self.frames.get(side)
             last_seen = frame[1] if frame else None
+            params = self.device_params.get(f"camera {side.value}")
             status[side] = {
                 "active": last_seen is not None and now() - last_seen < FRAME_STALE_S,
                 "last_seen": last_seen,
+                "source": params.get("source") if params else None,
             }
         return status
 

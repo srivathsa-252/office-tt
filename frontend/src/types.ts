@@ -65,6 +65,9 @@ export interface Config {
 export interface CameraStatus {
   active: boolean;
   last_seen: number | null;
+  // The --device the worker was started with (index, path or URL) — the only
+  // honest identifier available; OpenCV gives no friendly hardware name.
+  source: string | null;
 }
 
 export interface CameraDetections {

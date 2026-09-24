@@ -5,6 +5,7 @@ import { Avatar, AvatarPair } from "../components/Avatar";
 import { CameraPreviewPanel, CamerasToggle, useCameraStatus } from "../components/CameraPreview";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { Stage } from "../components/Stage";
+import { flip, loadCameraSwap } from "../cameraMapping";
 import { C, SIDE, type SideKey } from "../theme";
 import { activePlayer, partnerOf, teamName } from "../match";
 import type { MatchState, WinType } from "../types";
@@ -554,7 +555,10 @@ function BarZone({
   const partner = partnerOf(m, side, lead);
   const names = teamName([lead, partner]);
   const live = m.status === "live";
-  const hit = m.last_hit[side]?.player?.name ?? "unknown";
+  // last_hit is keyed by the literal camera that reported the swing, not by
+  // which side it's watching — flip it the same way setup assigned rosters,
+  // so a swapped pair of cameras doesn't put the swing on the wrong panel.
+  const hit = m.last_hit[flip(side, loadCameraSwap())]?.player?.name ?? "unknown";
   return (
     <button
       aria-label={live ? `Point to ${names}` : `Stats for ${lead.name}`}
