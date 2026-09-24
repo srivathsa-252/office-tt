@@ -14,6 +14,7 @@ for the live-preview panel on the scoreboard screen.
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import logging
 import queue
@@ -45,6 +46,28 @@ ENROLL_TIMEOUT_S = 15.0
 GALLERY_REFRESH_S = 10.0
 POLL_S = 1.0
 PREVIEW_MAX_WIDTH = 480  # downscale before encoding, so the preview stays light on bandwidth
+FACE_PHOTO_PAD = 0.35  # margin around the detected box, as a fraction of its size
+FACE_PHOTO_MAX_SIZE = 200  # px, longest side
+
+
+def crop_face_jpeg(frame, box: tuple[float, float, float, float]) -> bytes | None:
+    """A small JPEG crop around a detected face box, for Player.face_photo."""
+    import cv2
+
+    fh, fw = frame.shape[:2]
+    x, y, w, h = box
+    px, py = w * FACE_PHOTO_PAD, h * FACE_PHOTO_PAD
+    x0, y0 = max(int(x - px), 0), max(int(y - py), 0)
+    x1, y1 = min(int(x + w + px), fw), min(int(y + h + py), fh)
+    if x1 <= x0 or y1 <= y0:
+        return None
+    crop = frame[y0:y1, x0:x1]
+    ch, cw = crop.shape[:2]
+    if max(ch, cw) > FACE_PHOTO_MAX_SIZE:
+        scale = FACE_PHOTO_MAX_SIZE / max(ch, cw)
+        crop = cv2.resize(crop, (max(1, round(cw * scale)), max(1, round(ch * scale))))
+    ok, buf = cv2.imencode(".jpg", crop, [cv2.IMWRITE_JPEG_QUALITY, 82])
+    return buf.tobytes() if ok else None
 
 
 class Api:
@@ -154,6 +177,7 @@ class EnrollSession:
     started: float
     samples: list = field(default_factory=list)
     last_reason: str = "no face checked yet"
+    photo: bytes | None = None  # JPEG crop from the most recent sample
 
 
 class CameraWorker:
@@ -238,9 +262,9 @@ class CameraWorker:
             },
         )
         self.tracker.link_faces([(m.player_id, m.face) for m in matches if m.player_id], ts)
-        self.enroll_step(matches, pending, ts)
+        self.enroll_step(frame, matches, pending, ts)
 
-    def enroll_step(self, matches: list[FaceMatch], pending: list[dict], ts: float) -> None:
+    def enroll_step(self, frame, matches: list[FaceMatch], pending: list[dict], ts: float) -> None:
         ids = {p["id"] for p in pending if p["id"] not in self._handled}
         if self.enroll is not None and self.enroll.request_id not in ids:
             self.enroll = None  # cancelled, or replaced by a newer pick
@@ -270,6 +294,7 @@ class CameraWorker:
                 s.last_reason = "the unrecognised face changed between samples"
                 s.samples = []
             s.samples.append(m.embedding)
+            s.photo = crop_face_jpeg(frame, m.face.box) or s.photo
         if len(s.samples) >= ENROLL_SAMPLES:
             self._handled.add(s.request_id)
             vectors = [v.tolist() for v in s.samples]
@@ -277,6 +302,7 @@ class CameraWorker:
                 "why": f"it was picked by hand and was the only unrecognised face in "
                 f"camera {self.side}'s view for {ENROLL_SAMPLES} consecutive checks",
             }
+            photo_b64 = base64.b64encode(s.photo).decode("ascii") if s.photo else None
             try:
                 if s.player_id is not None:
                     body = {
@@ -284,6 +310,7 @@ class CameraWorker:
                         "source": f"camera {self.side}",
                         "request_id": s.request_id,
                         "evidence": evidence,
+                        "photo": photo_b64,
                     }
                     self.api.request("POST", f"/api/players/{s.player_id}/faces", body)
                     self.refresh_gallery_now()
@@ -294,7 +321,7 @@ class CameraWorker:
                     self.api.request(
                         "POST",
                         f"/api/capture/enroll-requests/{s.request_id}/scanned",
-                        {"vectors": vectors, "evidence": evidence},
+                        {"vectors": vectors, "evidence": evidence, "photo": photo_b64},
                     )
             except Exception as e:
                 log.warning("enroll upload failed: %s", e)
@@ -308,8 +335,6 @@ class CameraWorker:
             self.enroll = None
 
     def preview_step(self, frame) -> None:
-        import base64
-
         import cv2
 
         h, w = frame.shape[:2]

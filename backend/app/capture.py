@@ -63,6 +63,7 @@ class EnrollRequest:
     # Set once status is "scanned": the captured, not-yet-attached samples.
     vectors: list[list[float]] | None = None
     evidence: dict | None = None
+    photo: bytes | None = None  # a JPEG crop from the scan, for Player.face_photo
     last_reason: str | None = None  # set on failure, for the UI to show why
     # Set once status is "already_known": a scan-first request found the face
     # already confidently matches this existing player — the UI asks "are you
@@ -206,12 +207,15 @@ class CaptureHub:
     def enroll_request(self, rid: int) -> EnrollRequest | None:
         return next((r for r in self.enroll_requests if r.id == rid), None)
 
-    def mark_scanned(self, rid: int, vectors: list[list[float]], evidence: dict) -> EnrollRequest | None:
+    def mark_scanned(
+        self, rid: int, vectors: list[list[float]], evidence: dict, photo: bytes | None = None
+    ) -> EnrollRequest | None:
         req = self.enroll_request(rid)
         if req is not None:
             req.status = "scanned"
             req.vectors = vectors
             req.evidence = evidence
+            req.photo = photo
         return req
 
     def mark_already_known(

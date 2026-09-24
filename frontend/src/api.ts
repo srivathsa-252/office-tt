@@ -29,6 +29,9 @@ export const api = {
   players: () => req<PlayerRef[]>("GET", "/api/players"),
   addPlayer: (name: string) => req<PlayerRef>("POST", "/api/players", { name }),
   playerStats: (id: number) => req<PlayerStats>("GET", `/api/players/${id}/stats`),
+  photoUrl: (id: number) => `/api/players/${id}/photo`,
+  clearFaces: (id: number) => req<void>("DELETE", `/api/players/${id}/faces`),
+  deletePlayer: (id: number) => req<void>("DELETE", `/api/players/${id}`),
   requestEnroll: (camera: SideKey, player_id: number) =>
     req<{ id: number }>("POST", "/api/capture/enroll-requests", { camera, player_id }),
   // Scan-first: capture a face before anyone has typed a name.

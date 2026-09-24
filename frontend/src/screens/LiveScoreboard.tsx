@@ -3,6 +3,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { api, subscribeMatch } from "../api";
 import { Avatar, AvatarPair } from "../components/Avatar";
 import { CameraPreviewPanel, CamerasToggle, useCameraStatus } from "../components/CameraPreview";
+import { ConfirmDialog } from "../components/ConfirmDialog";
 import { Stage } from "../components/Stage";
 import { C, SIDE, type SideKey } from "../theme";
 import { activePlayer, partnerOf, teamName } from "../match";
@@ -320,76 +321,14 @@ function EndMatchConfirm({
   onCancel: () => void;
 }) {
   return (
-    <div
-      style={{
-        position: "absolute",
-        inset: 0,
-        zIndex: 20,
-        background: "rgba(11,13,16,0.85)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        padding: 24,
-      }}
-    >
-      <div
-        role="alertdialog"
-        aria-label="Confirm ending the match"
-        style={{
-          width: 380,
-          maxWidth: "100%",
-          background: C.surface,
-          border: `1px solid ${C.border}`,
-          borderRadius: 18,
-          padding: 24,
-          display: "flex",
-          flexDirection: "column",
-          gap: 8,
-          textAlign: "center",
-        }}
-      >
-        <div style={{ fontSize: 18, fontWeight: 800 }}>End this match?</div>
-        <div style={{ fontSize: 13, color: C.subtle, lineHeight: 1.5 }}>
-          The score so far won't be saved and neither player's rating will change —
-          same as abandoning it. This can't be undone.
-        </div>
-        <div style={{ display: "flex", gap: 10, marginTop: 14 }}>
-          <button
-            onClick={onCancel}
-            disabled={busy}
-            style={{
-              flex: 1,
-              padding: "12px 0",
-              border: `1.5px solid ${C.border}`,
-              borderRadius: 12,
-              background: "transparent",
-              color: C.text,
-              fontSize: 14,
-              fontWeight: 700,
-            }}
-          >
-            Cancel
-          </button>
-          <button
-            onClick={onConfirm}
-            disabled={busy}
-            style={{
-              flex: 1,
-              padding: "12px 0",
-              border: "none",
-              borderRadius: 12,
-              background: C.coral,
-              color: C.bg,
-              fontSize: 14,
-              fontWeight: 800,
-              opacity: busy ? 0.6 : 1,
-            }}
-          >
-            End Match
-          </button>
-        </div>
-      </div>
-    </div>
+    <ConfirmDialog
+      title="End this match?"
+      body="The score so far won't be saved and neither player's rating will change — same as abandoning it. This can't be undone."
+      confirmLabel="End Match"
+      busy={busy}
+      onConfirm={onConfirm}
+      onCancel={onCancel}
+    />
   );
 }
 

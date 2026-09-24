@@ -308,6 +308,81 @@ def test_scan_first_enroll_registers_a_new_player(client):
     assert client.get(f"/api/capture/enroll-requests/{rid}").json()["status"] == "done"
 
 
+def test_scan_first_enroll_stores_a_photo(client):
+    import base64
+
+    jpeg = b"\xff\xd8\xff\xe0fake-jpeg-bytes"
+    rid = client.post("/api/capture/enroll-requests", json={"camera": "A"}).json()["id"]
+    r = client.post(
+        f"/api/capture/enroll-requests/{rid}/scanned",
+        json={"vectors": [fake_vector()] * 5, "photo": base64.b64encode(jpeg).decode("ascii")},
+    )
+    assert r.status_code == 204
+
+    player = client.post(f"/api/capture/enroll-requests/{rid}/register", json={"name": "Photo Pat"}).json()
+
+    got = client.get(f"/api/players/{player['id']}/photo")
+    assert got.status_code == 200
+    assert got.headers["content-type"] == "image/jpeg"
+    assert got.content == jpeg
+
+
+def test_add_faces_stores_a_photo(client):
+    import base64
+
+    jpeg = b"\xff\xd8\xff\xe0another-fake-jpeg"
+    pr = add_players(client, "Praneeth")[0]
+    r = client.post(
+        f"/api/players/{pr}/faces",
+        json={"vectors": [fake_vector()], "photo": base64.b64encode(jpeg).decode("ascii")},
+    )
+    assert r.status_code == 201
+    assert client.get(f"/api/players/{pr}/photo").content == jpeg
+
+
+def test_clear_faces_also_clears_the_photo(client):
+    import base64
+
+    jpeg = b"\xff\xd8\xff\xe0clear-me"
+    pr = add_players(client, "Praneeth")[0]
+    client.post(
+        f"/api/players/{pr}/faces",
+        json={"vectors": [fake_vector()], "photo": base64.b64encode(jpeg).decode("ascii")},
+    )
+    assert client.get(f"/api/players/{pr}/photo").status_code == 200
+
+    r = client.delete(f"/api/players/{pr}/faces")
+    assert r.status_code == 204
+    assert client.get(f"/api/players/{pr}/photo").status_code == 404
+    gallery = {row["player_id"]: row["vectors"] for row in client.get("/api/face-gallery").json()}
+    assert pr not in gallery
+
+
+def test_player_photo_404_when_none(client):
+    pr = add_players(client, "Praneeth")[0]
+    assert client.get(f"/api/players/{pr}/photo").status_code == 404
+    assert client.get("/api/players/999999/photo").status_code == 404
+
+
+def test_delete_player_without_matches(client):
+    pr = add_players(client, "Praneeth")[0]
+    assert client.delete(f"/api/players/{pr}").status_code == 204
+    assert pr not in [p["id"] for p in client.get("/api/players").json()]
+    assert client.get(f"/api/players/{pr}/stats").status_code == 404
+
+
+def test_delete_player_with_match_history_is_refused(client):
+    pr, sr = add_players(client, "Praneeth", "Sri")
+    singles(client, pr, sr)  # live, never finished
+    r = client.delete(f"/api/players/{pr}")
+    assert r.status_code == 409
+    assert pr in [p["id"] for p in client.get("/api/players").json()]
+
+
+def test_delete_unknown_player_404(client):
+    assert client.delete("/api/players/999999").status_code == 404
+
+
 def test_enroll_register_before_scan_completes_is_conflict(client):
     rid = client.post("/api/capture/enroll-requests", json={"camera": "A"}).json()["id"]
     r = client.post(f"/api/capture/enroll-requests/{rid}/register", json={"name": "Too Soon"})

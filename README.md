@@ -93,6 +93,14 @@ The setup screen's Format card is editable: **serves per turn** (3 or 5), **game
 - `GET /api/capture/enroll-requests/{id}` — the frontend polls this (every 500 ms while scanning) for `status`: `pending → scanned → done`, `pending → already_known → done`, or `failed` with a `reason` (the same specific messages as before: face too small, confidence too low, no face in view, gave up after 15s). `matched_player` is set once `already_known`.
 - `POST /api/capture/enroll-requests/{id}/register {name}` — once `status` is `scanned`, creates the player and attaches the already-captured samples in one step. The raw face vectors never round-trip through the browser.
 
+### Player directory (`/players`)
+
+Every enrollment success (scan-first register, or teaching an existing player's face) also crops and saves a small JPEG around the detected face box (`devices/camera.crop_face_jpeg`, `Player.face_photo`) — a snapshot from the moment it was last recognised and enrolled, not a live view. `GET /api/players/{id}/photo` serves it, or 404 if there isn't one yet; both `/players` and a player's own page fall back to the initials avatar until there is.
+
+**Deleting.** A player page has a Danger zone with two separate actions:
+- **Delete face data** — `DELETE /api/players/{id}/faces`, unchanged, now also clears `face_photo` (the photo belongs to the face data, so wiping one wipes both). They'll need to register again before a camera recognises them.
+- **Delete player** — new `DELETE /api/players/{id}`. Refused (409) if they've appeared in any match, live, finished or abandoned — deleting them would break that match's own player references and, for a finished one, everyone else's history. Only ever removes a player who's never actually played.
+
 ### Swings and the last hitter
 
 - **Pose.** MediaPipe's pose model finds up to 2 bodies per camera. Bodies are tracked from frame to frame by torso position.
@@ -138,7 +146,9 @@ The page has three tabs:
 | `GET /api/capture/stream/{camera}` | | The same frames as a live `multipart/x-mixed-replace` MJPEG stream — what the scoreboard's preview panel actually points an `<img>` at. |
 | `GET /api/capture/camera-status` | | `{A, B}` → `{active, last_seen}`, from how recently each posted a preview frame. |
 | `GET /api/capture/camera-needed` | | `{needed}` — a worker polls this and pauses analysis/preview when false (see "Cameras pause..." above). |
-| `GET /api/face-gallery` · `POST/DELETE /api/players/{id}/faces` | `{vectors, source, request_id?}` | The face gallery. |
+| `GET /api/face-gallery` · `POST/DELETE /api/players/{id}/faces` | `{vectors, source, request_id?, photo?}` | The face gallery; `DELETE` also clears the stored photo. |
+| `GET /api/players/{id}/photo` | | The player's last-enrolled face crop (JPEG), or 404 if none. |
+| `DELETE /api/players/{id}` | | Removes a player — 409 if they've been in any match. |
 | `POST/GET /api/capture/enroll-requests` | `{camera, player_id?}` | Asks a camera to learn a face — `player_id` given teaches an existing player; omitted starts a scan-first request (see "Match setup" above). |
 | `GET /api/capture/enroll-requests/{id}` | | `{status, reason, matched_player}` — the setup screen polls this while scanning. |
 | `POST /api/capture/enroll-requests/{id}/scanned` · `…/already-known` · `…/failed` · `…/register` | `{vectors, evidence}` · `{player_id, similarity}` · `{reason}` · `{name}` | The worker's scan-first terminal steps, and the frontend's name step. |

@@ -35,6 +35,7 @@ KINDS: dict[str, tuple[str, str]] = {
         "Already known",
         "A scan-first request's face already matches an existing player.",
     ),
+    "player.deleted": ("Player deleted", "A player with no match history was removed."),
     "swing": ("Swing", "A stroke seen by a camera, and who it was attributed to."),
     "device.config": ("Device", "Thresholds a camera or the sensor reported when it started."),
 }

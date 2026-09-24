@@ -120,6 +120,7 @@ class FacesIn(BaseModel):
     source: str = Field("api", max_length=40)
     request_id: int | None = None
     evidence: dict = {}
+    photo: str | None = None  # base64 JPEG crop from the scan
 
 
 class EnrollRequestIn(BaseModel):
@@ -135,6 +136,7 @@ class EnrollFailedIn(BaseModel):
 class EnrollScannedIn(BaseModel):
     vectors: list[list[float]] = Field(min_length=1)
     evidence: dict = {}
+    photo: str | None = None  # base64 JPEG crop from the scan
 
 
 class EnrollAlreadyKnownIn(BaseModel):
@@ -216,6 +218,36 @@ def create_app(session_factory: sessionmaker | None = None, init: bool = True) -
         if player is None:
             raise HTTPException(404, "player not found")
         return player_stats(db, player)
+
+    @app.get("/api/players/{player_id}/photo", response_class=Response)
+    def get_player_photo(player_id: int, db: Session = Depends(get_db)):
+        # The JPEG crop taken when enrollment last succeeded for them (see
+        # devices/camera.py's crop_face_jpeg) — not a live view, a snapshot.
+        player = db.get(Player, player_id)
+        if player is None or not player.face_photo:
+            raise HTTPException(404, "no photo for this player")
+        return Response(content=player.face_photo, media_type="image/jpeg")
+
+    @app.delete("/api/players/{player_id}", status_code=204)
+    def delete_player(player_id: int, db: Session = Depends(get_db)):
+        player = db.get(Player, player_id)
+        if player is None:
+            raise HTTPException(404, "player not found")
+        # Refused once they've been in any match (live, finished or
+        # abandoned) — deleting them would break that match's own player
+        # references and, for a finished one, everyone else's history.
+        matches = db.scalars(select(Match)).all()
+        if any(player_id in m.side_a_players + m.side_b_players for m in matches):
+            raise HTTPException(409, "player has match history and can't be deleted")
+        db.query(FaceEmbedding).filter_by(player_id=player_id).delete()
+        record(
+            db,
+            "player.deleted",
+            f"{player.name} was deleted (id {player_id}) — they'd never played a match.",
+            {"player_id": player_id, "name": player.name},
+        )
+        db.delete(player)
+        db.commit()
 
     # -- matches -----------------------------------------------------------
 
@@ -441,6 +473,11 @@ def create_app(session_factory: sessionmaker | None = None, init: bool = True) -
             raise HTTPException(422, str(e))
         for v in vectors:
             db.add(FaceEmbedding(player_id=player_id, vector=v, source=body.source))
+        if body.photo:
+            try:
+                player.face_photo = base64.b64decode(body.photo, validate=True)
+            except binascii.Error:
+                raise HTTPException(422, "photo must be base64-encoded")
         req = hub.enroll_request(body.request_id) if body.request_id else None
         if req is not None:
             req.status = "done"
@@ -461,6 +498,9 @@ def create_app(session_factory: sessionmaker | None = None, init: bool = True) -
     @app.delete("/api/players/{player_id}/faces", status_code=204)
     def clear_faces(player_id: int, db: Session = Depends(get_db)):
         db.query(FaceEmbedding).filter_by(player_id=player_id).delete()
+        player = db.get(Player, player_id)
+        if player is not None:
+            player.face_photo = None  # the snapshot belongs to the face data being cleared
         db.commit()
 
     @app.post("/api/capture/enroll-requests", status_code=201)
@@ -539,7 +579,13 @@ def create_app(session_factory: sessionmaker | None = None, init: bool = True) -
             vectors = [normalise(v) for v in body.vectors]
         except ValueError as e:
             raise HTTPException(422, str(e))
-        hub.mark_scanned(rid, vectors, body.evidence)
+        photo = None
+        if body.photo:
+            try:
+                photo = base64.b64decode(body.photo, validate=True)
+            except binascii.Error:
+                raise HTTPException(422, "photo must be base64-encoded")
+        hub.mark_scanned(rid, vectors, body.evidence, photo)
         record(
             db,
             "face.scanned",
@@ -576,7 +622,7 @@ def create_app(session_factory: sessionmaker | None = None, init: bool = True) -
         req = hub.enroll_request(rid)
         if req is None or req.status != "scanned" or req.vectors is None:
             raise HTTPException(409, "this scan isn't ready to be named yet")
-        player = Player(name=body.name.strip())
+        player = Player(name=body.name.strip(), face_photo=req.photo)
         db.add(player)
         db.flush()
         for v in req.vectors:
@@ -592,7 +638,8 @@ def create_app(session_factory: sessionmaker | None = None, init: bool = True) -
             {**(req.evidence or {}), "samples_added": total, "samples_total": total, "request_id": rid},
         )
         req.status = "done"
-        req.vectors = None  # no need to keep face vectors in memory longer than this
+        req.vectors = None  # no need to keep face vectors/photo in memory longer than this
+        req.photo = None
         db.commit()
         return player_ref(player)
 

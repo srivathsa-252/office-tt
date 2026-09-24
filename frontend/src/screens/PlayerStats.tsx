@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import { api } from "../api";
-import { Avatar, AvatarPair } from "../components/Avatar";
+import { AvatarPair } from "../components/Avatar";
+import { ConfirmDialog } from "../components/ConfirmDialog";
+import { PlayerPhoto } from "../components/PlayerPhoto";
 import { RatingChart, type RatingPoint } from "../components/RatingChart";
 import { C, SIDE } from "../theme";
 import type { HistoryRow, PlayerStats as Stats, StyleTagDetail } from "../types";
@@ -76,13 +78,48 @@ export function PlayerStats() {
         {error && (
           <div style={{ padding: "24px 0", color: C.coral, fontWeight: 700 }}>{error}</div>
         )}
-        {s && <StatsBody s={s} />}
+        {s && <StatsBody s={s} onRefresh={() => api.playerStats(playerId).then(setS)} />}
       </div>
     </div>
   );
 }
 
-function StatsBody({ s }: { s: Stats }) {
+function StatsBody({ s, onRefresh }: { s: Stats; onRefresh: () => void }) {
+  const navigate = useNavigate();
+  const [photoKey, setPhotoKey] = useState(0);
+  const [confirmClearFaces, setConfirmClearFaces] = useState(false);
+  const [confirmDeletePlayer, setConfirmDeletePlayer] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const clearFaces = async () => {
+    setConfirmClearFaces(false);
+    setBusy(true);
+    setActionError(null);
+    try {
+      await api.clearFaces(s.player.id);
+      setPhotoKey((k) => k + 1);
+      onRefresh();
+    } catch (e) {
+      setActionError((e as Error).message);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const deletePlayer = async () => {
+    setConfirmDeletePlayer(false);
+    setBusy(true);
+    setActionError(null);
+    try {
+      await api.deletePlayer(s.player.id);
+      navigate("/players");
+    } catch (e) {
+      setActionError((e as Error).message);
+      setBusy(false);
+    }
+  };
+
   const tiles: [string, string, string | null][] = [
     [pct(s.win_rate), "Win rate", null],
     [
@@ -113,7 +150,7 @@ function StatsBody({ s }: { s: Stats }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 24, marginTop: 18 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 16, flexWrap: "wrap" }}>
-        <Avatar player={s.player} size={64} fontSize={22} background={C.teal} color={C.bg} />
+        <PlayerPhoto player={s.player} size={64} refreshKey={photoKey} />
         <div style={{ flexGrow: 1, minWidth: 160 }}>
           <div style={{ fontSize: 24, fontWeight: 800 }}>{s.player.name}</div>
           <div style={{ fontSize: 13, color: C.subtle }}>
@@ -326,6 +363,75 @@ function StatsBody({ s }: { s: Stats }) {
           </div>
         ))}
       </div>
+
+      <div
+        style={{
+          display: "flex",
+          flexDirection: "column",
+          gap: 10,
+          marginTop: 8,
+          paddingTop: 16,
+          borderTop: `1px solid ${C.rowBorder}`,
+        }}
+      >
+        <div style={{ ...sectionLabel, color: C.coral }}>Danger zone</div>
+        {actionError && (
+          <div style={{ fontSize: 12, color: C.coral, fontWeight: 700 }}>{actionError}</div>
+        )}
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+          <button
+            onClick={() => setConfirmClearFaces(true)}
+            disabled={busy}
+            style={{
+              padding: "10px 16px",
+              borderRadius: 10,
+              border: `1.5px solid ${C.coral}`,
+              background: "transparent",
+              color: C.coral,
+              fontSize: 13,
+              fontWeight: 700,
+            }}
+          >
+            Delete face data
+          </button>
+          <button
+            onClick={() => setConfirmDeletePlayer(true)}
+            disabled={busy}
+            style={{
+              padding: "10px 16px",
+              borderRadius: 10,
+              border: "none",
+              background: C.coral,
+              color: C.bg,
+              fontSize: 13,
+              fontWeight: 800,
+            }}
+          >
+            Delete player
+          </button>
+        </div>
+      </div>
+
+      {confirmClearFaces && (
+        <ConfirmDialog
+          title="Delete face data?"
+          body={`${s.player.name}'s enrolled face samples and photo will be cleared. They'll need to register again before a camera recognises them.`}
+          confirmLabel="Delete face data"
+          busy={busy}
+          onConfirm={clearFaces}
+          onCancel={() => setConfirmClearFaces(false)}
+        />
+      )}
+      {confirmDeletePlayer && (
+        <ConfirmDialog
+          title="Delete player?"
+          body={`${s.player.name} will be permanently removed, along with their face data. This only works if they've never played a match.`}
+          confirmLabel="Delete player"
+          busy={busy}
+          onConfirm={deletePlayer}
+          onCancel={() => setConfirmDeletePlayer(false)}
+        />
+      )}
     </div>
   );
 }

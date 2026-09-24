@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../api";
-import { Avatar } from "../components/Avatar";
+import { PlayerPhoto } from "../components/PlayerPhoto";
 import { C, SIDE } from "../theme";
 import type { PlayerStats } from "../types";
 
@@ -80,7 +80,7 @@ function PlayerCard({ s }: { s: PlayerStats }) {
         }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <Avatar player={s.player} size={48} fontSize={17} background={C.teal} color={C.bg} />
+          <PlayerPhoto player={s.player} size={48} />
           <div style={{ flexGrow: 1, minWidth: 0 }}>
             <div style={{ fontSize: 16, fontWeight: 800, overflow: "hidden", textOverflow: "ellipsis" }}>
               {s.player.name}
