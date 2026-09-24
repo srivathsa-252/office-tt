@@ -35,6 +35,7 @@ from .faces import (
     Gallery,
     Presence,
     already_known_match,
+    in_guide_region,
     pick_unknown_face,
     recognise,
 )
@@ -274,11 +275,16 @@ class CameraWorker:
         s = self.enroll
         if s is None:
             return
+        # Only a face actually centred in the guide oval counts while
+        # scanning — a face elsewhere in the wide shot (someone in the
+        # background, off to the side) is ignored, the same way the wizard's
+        # preview claims to work, instead of quietly analysing the whole frame.
+        guide_matches = [m for m in matches if in_guide_region(m.face, frame.shape)]
         if s.player_id is None:
             # Scan-first only: if the one face in view already confidently
             # matches someone, ask "are you already them?" instead of
             # scanning them in as a second, separate person.
-            known = already_known_match(matches)
+            known = already_known_match(guide_matches)
             if known is not None:
                 self._handled.add(s.request_id)
                 self.api.post_async(
@@ -287,7 +293,9 @@ class CameraWorker:
                 )
                 self.enroll = None
                 return
-        m, reason = pick_unknown_face(matches)
+        m, reason = pick_unknown_face(guide_matches)
+        if m is None and not guide_matches and matches:
+            reason = "a face is visible but not centred in the guide frame"
         s.last_reason = reason
         if m is not None:
             if s.samples and float(s.samples[0] @ m.embedding) < ENROLL_SAME_PERSON:

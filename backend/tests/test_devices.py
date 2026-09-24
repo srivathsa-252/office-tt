@@ -5,6 +5,7 @@ import numpy as np
 import pytest
 
 from app.devices.faces import (
+    ENROLL_MIN_SCORE,
     ENROLL_MIN_SIZE_PX,
     Face,
     FaceMatch,
@@ -12,6 +13,7 @@ from app.devices.faces import (
     Presence,
     already_known_match,
     assign,
+    in_guide_region,
     pick_unknown_face,
 )
 from app.devices.sensor import ImpulseDetector, suggest_threshold
@@ -70,6 +72,24 @@ def test_already_known_match_needs_exactly_one_recognised_face():
     assert already_known_match([match(1), match(2)]) is None
     m = already_known_match([match(1)])
     assert m is not None and m.player_id == 1
+
+
+def test_already_known_match_refuses_a_small_or_low_confidence_face():
+    # A distant or poor-angle face shouldn't be trusted to claim someone's
+    # identity even if its similarity crossed the match threshold — the same
+    # bar pick_unknown_face already holds new enrollment to.
+    assert already_known_match([match(1, size=ENROLL_MIN_SIZE_PX - 1)]) is None
+    assert already_known_match([match(1, score=ENROLL_MIN_SCORE - 0.01)]) is None
+    assert already_known_match([match(1, size=ENROLL_MIN_SIZE_PX, score=ENROLL_MIN_SCORE)]) is not None
+
+
+def test_in_guide_region_only_accepts_a_face_centred_in_the_frame():
+    frame_shape = (480, 640)  # h, w
+    centred = Face((300, 190, 40, 100), 0.95, np.zeros(15))  # centre ~(320, 240)
+    assert in_guide_region(centred, frame_shape) is True
+
+    off_to_the_side = Face((550, 190, 40, 100), 0.95, np.zeros(15))  # centre ~(570, 240)
+    assert in_guide_region(off_to_the_side, frame_shape) is False
 
 
 # -- swing ---------------------------------------------------------------------

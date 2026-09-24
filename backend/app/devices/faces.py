@@ -29,6 +29,13 @@ ENROLL_MIN_SCORE = 0.9
 ENROLL_MIN_SIZE_PX = 80
 ENROLL_SAMPLES = 5
 ENROLL_SAME_PERSON = 0.5  # new samples must match the first one at least this well
+# The scan wizard's guide oval, as a fraction of the frame — mirrors
+# GUIDE_WIDTH_PCT / GUIDE_ASPECT in frontend/src/components/RegisterFace.tsx.
+# Kept in sync by hand (different languages, no shared constant); if one
+# changes, change the other. Only faces centred here count while scanning —
+# see in_guide_region.
+GUIDE_WIDTH_FRAC = 0.42
+GUIDE_HEIGHT_FRAC = GUIDE_WIDTH_FRAC / 0.75  # aspect 3:4, portrait
 
 
 @dataclass
@@ -166,11 +173,31 @@ class Presence:
         return f"{self.count(pid)}/{len(self.history)}"
 
 
+def in_guide_region(face: Face, frame_shape: tuple[int, int, int] | tuple[int, int]) -> bool:
+    """Whether a face is centred inside the scan wizard's guide oval, in the
+    actual frame being analysed — not just anywhere in its wide field of
+    view. A face outside it is ignored for scanning, the same way the guide
+    itself claims to work, instead of only dimming it in the preview."""
+    h, w = frame_shape[:2]
+    x, y, fw, fh = face.box
+    fx, fy = x + fw / 2, y + fh / 2
+    gw, gh = w * GUIDE_WIDTH_FRAC, h * GUIDE_HEIGHT_FRAC
+    return abs(fx - w / 2) <= gw / 2 and abs(fy - h / 2) <= gh / 2
+
+
+def _good_quality(m: FaceMatch) -> bool:
+    return m.face.score >= ENROLL_MIN_SCORE and min(m.face.box[2], m.face.box[3]) >= ENROLL_MIN_SIZE_PX
+
+
 def already_known_match(matches: list[FaceMatch]) -> FaceMatch | None:
     """The one face in view, if it's already confidently matched to an
     existing player — so a scan-first registration can ask 'are you already
-    them?' instead of scanning them in as a second, separate person."""
-    if len(matches) == 1 and matches[0].player_id is not None:
+    them?' instead of scanning them in as a second, separate person. Held to
+    the same quality bar as enrolling a new face (score, size): a small or
+    uncertain detection shouldn't be trusted to claim someone's identity any
+    more than it's trusted to learn a new one — that gap let a distant,
+    poor-angle face get matched to the wrong existing player."""
+    if len(matches) == 1 and matches[0].player_id is not None and _good_quality(matches[0]):
         return matches[0]
     return None
 
