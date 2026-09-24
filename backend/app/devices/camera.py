@@ -36,6 +36,7 @@ from .faces import (
     Presence,
     already_known_match,
     in_guide_region,
+    pick_face_for_known_player,
     pick_unknown_face,
     recognise,
 )
@@ -293,7 +294,13 @@ class CameraWorker:
                 )
                 self.enroll = None
                 return
-        m, reason = pick_unknown_face(guide_matches)
+            m, reason = pick_unknown_face(guide_matches)
+        else:
+            # Teaching a specific, already-picked player: a face already
+            # recognised as THEM is fine too — this is how re-scanning
+            # someone under different lighting/angle/day adds another
+            # sample, rather than being refused as "already known".
+            m, reason = pick_face_for_known_player(guide_matches, s.player_id)
         if m is None and not guide_matches and matches:
             reason = "a face is visible but not centred in the guide frame"
         s.last_reason = reason

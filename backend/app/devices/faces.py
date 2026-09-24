@@ -222,3 +222,25 @@ def pick_unknown_face(matches: list[FaceMatch]) -> tuple[FaceMatch | None, str]:
     if min(m.face.box[2], m.face.box[3]) < ENROLL_MIN_SIZE_PX:
         return None, f"face is under {ENROLL_MIN_SIZE_PX}px — too far away for a good sample"
     return m, "exactly one unrecognised face in view"
+
+
+def pick_face_for_known_player(matches: list[FaceMatch], player_id: int) -> tuple[FaceMatch | None, str]:
+    """The one face safe to add as another sample for a specific, already-
+    picked player — teaching a camera more views of someone (different
+    lighting, angle, day) rather than only enrolling brand-new people.
+    Unlike pick_unknown_face, a face already recognised as THIS player is
+    fine too; one recognised as anyone else is refused outright, instead of
+    silently mixing another player's face into their gallery."""
+    if not matches:
+        return None, "no face in view"
+    eligible = [m for m in matches if m.player_id is None or m.player_id == player_id]
+    if len(matches) > 1 or not eligible:
+        if not eligible:
+            return None, "the face in view is already recognised as a different player"
+        return None, f"{len(matches)} faces in view — can't tell which one is theirs"
+    m = eligible[0]
+    if m.face.score < ENROLL_MIN_SCORE:
+        return None, f"face confidence {m.face.score:.2f} is below {ENROLL_MIN_SCORE}"
+    if min(m.face.box[2], m.face.box[3]) < ENROLL_MIN_SIZE_PX:
+        return None, f"face is under {ENROLL_MIN_SIZE_PX}px — too far away for a good sample"
+    return m, "exactly one face in view, matching the picked player"

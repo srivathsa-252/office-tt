@@ -14,6 +14,7 @@ from app.devices.faces import (
     already_known_match,
     assign,
     in_guide_region,
+    pick_face_for_known_player,
     pick_unknown_face,
 )
 from app.devices.sensor import ImpulseDetector, suggest_threshold
@@ -81,6 +82,30 @@ def test_already_known_match_refuses_a_small_or_low_confidence_face():
     assert already_known_match([match(1, size=ENROLL_MIN_SIZE_PX - 1)]) is None
     assert already_known_match([match(1, score=ENROLL_MIN_SCORE - 0.01)]) is None
     assert already_known_match([match(1, size=ENROLL_MIN_SIZE_PX, score=ENROLL_MIN_SCORE)]) is not None
+
+
+def test_pick_face_for_known_player_accepts_their_own_already_recognised_face():
+    # Re-scanning someone already in the gallery (different lighting/angle/
+    # day) should add a sample, not be refused as "already known" the way
+    # pick_unknown_face would refuse it.
+    m, why = pick_face_for_known_player([match(1)], player_id=1)
+    assert m is not None and "matching the picked player" in why
+
+
+def test_pick_face_for_known_player_accepts_a_still_unrecognised_face():
+    m, why = pick_face_for_known_player([match(None)], player_id=1)
+    assert m is not None
+
+
+def test_pick_face_for_known_player_refuses_a_different_player():
+    m, why = pick_face_for_known_player([match(2)], player_id=1)
+    assert m is None and "different player" in why
+
+
+def test_pick_face_for_known_player_refuses_multiple_faces_or_none():
+    assert pick_face_for_known_player([], player_id=1)[0] is None
+    m, why = pick_face_for_known_player([match(1), match(None)], player_id=1)
+    assert m is None and "2 faces" in why
 
 
 def test_in_guide_region_only_accepts_a_face_centred_in_the_frame():
