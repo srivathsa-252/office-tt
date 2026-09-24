@@ -84,7 +84,13 @@ The setup screen's Format card is editable: **serves per turn** (3 or 5), **game
 
 **One camera instead of two.** With Cameras set to 1, both sides draw from camera A's detections instead of one camera per side — the roster still fills Side A before Side B, first-detected-first-assigned. `POST /api/capture/enroll-requests` targets camera A for both sides too, so auto-enroll after a manual pick still works. The camera-count choice is saved per browser (`localStorage`), not sent to the API — it only changes how the setup screen reads detections, since which camera workers are actually running is an operational fact the app doesn't control.
 
-**New face, register?** `GET /api/capture/detections` now reports `unknown_present` per camera — a face was seen that didn't confidently match anyone (`player_id: null` in what the camera posted), not necessarily a stranger — presence-smoothing might just not have confirmed them yet. When true and a slot is still open, a dismissible banner offers to register them immediately, instead of waiting for a manual "Waiting for face…" tap; registering opens the same picker sheet, name field focused. Every face-rec-picked card also gets a small **"Not them?"** label under "✓ Detected", making the existing tap-to-correct flow visible instead of relying on people discovering it.
+**New face, register?** `GET /api/capture/detections` now reports `unknown_present` per camera — a face was seen that didn't confidently match anyone (`player_id: null` in what the camera posted), not necessarily a stranger — presence-smoothing might just not have confirmed them yet. When true and a slot is still open, a dismissible banner offers to register them immediately, instead of waiting for a manual "Waiting for face…" tap. Every face-rec-picked card also gets a small **"Not them?"** label under "✓ Detected", making the existing tap-to-correct flow visible instead of relying on people discovering it.
+
+**Registering a new face is scan-first**, not name-first: tapping Register (from the banner, or "Register new face" in the manual picker) opens a wizard — live preview with a scan animation, "Scanned successfully!", *then* it asks for a name, then "Registered successfully!" — matching what actually has to happen physically (the camera needs a clean look at the face regardless of what they're called). This needed a real API change, not just a frontend one: a face is captured *before* any player exists.
+
+- `POST /api/capture/enroll-requests` — `player_id` is now optional. Given, it's the existing "teach this face to an already-known player" flow, unchanged. Omitted, it starts a scan-first request: the camera worker captures 5 samples the same way, then instead of uploading them straight to a player, it calls the new `POST .../{id}/scanned {vectors, evidence}`, which holds them server-side (not the browser) against that request.
+- `GET /api/capture/enroll-requests/{id}` — the frontend polls this (every 500 ms while scanning) for `status`: `pending → scanned → done`, or `failed` with a `reason` (the same specific messages as before: face too small, confidence too low, no face in view, gave up after 15s).
+- `POST /api/capture/enroll-requests/{id}/register {name}` — once `status` is `scanned`, creates the player and attaches the already-captured samples in one step. The raw face vectors never round-trip through the browser.
 
 ### Swings and the last hitter
 
@@ -132,7 +138,9 @@ The page has three tabs:
 | `GET /api/capture/camera-status` | | `{A, B}` → `{active, last_seen}`, from how recently each posted a preview frame. |
 | `GET /api/capture/camera-needed` | | `{needed}` — a worker polls this and pauses analysis/preview when false (see "Cameras pause..." above). |
 | `GET /api/face-gallery` · `POST/DELETE /api/players/{id}/faces` | `{vectors, source, request_id?}` | The face gallery. |
-| `POST/GET /api/capture/enroll-requests` · `…/{id}/failed` | | Asks a camera to learn a face. |
+| `POST/GET /api/capture/enroll-requests` | `{camera, player_id?}` | Asks a camera to learn a face — `player_id` given teaches an existing player; omitted starts a scan-first request (see "Match setup" above). |
+| `GET /api/capture/enroll-requests/{id}` | | `{status, reason}` — the setup screen polls this while scanning. |
+| `POST /api/capture/enroll-requests/{id}/scanned` · `…/failed` · `…/register` | `{vectors, evidence}` · `{reason}` · `{name}` | The worker's scan-first terminal steps, and the frontend's name step. |
 
 `ts` is epoch seconds from the shared clock. When it's omitted, the server's time is used.
 

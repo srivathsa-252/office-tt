@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api";
 import { Avatar, CheckIcon } from "../components/Avatar";
 import { CameraPreviewPanel, CamerasToggle, useCameraStatus } from "../components/CameraPreview";
+import { RegisterFaceWizard } from "../components/RegisterFace";
 import { C, SIDE, type SideKey } from "../theme";
 import type { Detections, Format, PlayerRef } from "../types";
 
@@ -47,9 +48,8 @@ export function MatchSetup() {
   // Manual picks, per side and slot index — the fallback when face-rec can't see someone.
   const [manual, setManual] = useState<Record<SideKey, (PlayerRef | null)[]>>({ A: [], B: [] });
   const [firstServer, setFirstServer] = useState<Record<SideKey, number | null>>({ A: null, B: null });
-  const [picking, setPicking] = useState<{ side: SideKey; index: number; forNewFace?: boolean } | null>(
-    null,
-  );
+  const [picking, setPicking] = useState<{ side: SideKey; index: number } | null>(null);
+  const [registering, setRegistering] = useState<{ side: SideKey; index: number } | null>(null);
   const [newFaceDismissed, setNewFaceDismissed] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const cameraStatus = useCameraStatus();
@@ -236,9 +236,7 @@ export function MatchSetup() {
         {newFaceSlot && !newFaceDismissed && (
           <NewFaceBanner
             side={newFaceSlot.side}
-            onRegister={() =>
-              setPicking({ side: newFaceSlot.side, index: newFaceSlot.index, forNewFace: true })
-            }
+            onRegister={() => setRegistering({ side: newFaceSlot.side, index: newFaceSlot.index })}
             onDismiss={() => setNewFaceDismissed(true)}
           />
         )}
@@ -392,14 +390,28 @@ export function MatchSetup() {
           side={picking.side}
           excluded={usedIds}
           canClear={!!manual[picking.side][picking.index]}
-          autoFocusName={!!picking.forNewFace}
           onPick={(p) => {
             setManualSlot(picking.side, picking.index, p);
             // Ask that camera to learn this face, so next time it's detected.
             if (p) api.requestEnroll(cameraFor(picking.side), p.id).catch(() => {});
             setPicking(null);
           }}
+          onRegisterNew={() => {
+            setRegistering({ side: picking.side, index: picking.index });
+            setPicking(null);
+          }}
           onClose={() => setPicking(null)}
+        />
+      )}
+
+      {registering && (
+        <RegisterFaceWizard
+          camera={cameraFor(registering.side)}
+          onDone={(p) => {
+            setManualSlot(registering.side, registering.index, p);
+            setRegistering(null);
+          }}
+          onClose={() => setRegistering(null)}
         />
       )}
     </div>
@@ -583,30 +595,21 @@ function PlayerPicker({
   side,
   excluded,
   canClear,
-  autoFocusName,
   onPick,
+  onRegisterNew,
   onClose,
 }: {
   side: SideKey;
   excluded: Set<number>;
   canClear: boolean;
-  autoFocusName?: boolean;
   onPick: (p: PlayerRef | null) => void;
+  onRegisterNew: () => void;
   onClose: () => void;
 }) {
   const [players, setPlayers] = useState<PlayerRef[]>([]);
-  const [name, setName] = useState("");
-  const nameInput = useRef<HTMLInputElement>(null);
   useEffect(() => {
     api.players().then(setPlayers);
   }, []);
-  useEffect(() => {
-    if (autoFocusName) nameInput.current?.focus();
-  }, [autoFocusName]);
-  const add = async () => {
-    if (!name.trim()) return;
-    onPick(await api.addPlayer(name.trim()));
-  };
   const color = SIDE[side].color;
   const available = players.filter((p) => !excluded.has(p.id));
 
@@ -649,7 +652,7 @@ function PlayerPicker({
             textTransform: "uppercase",
           }}
         >
-          {autoFocusName ? "Register new player" : `Pick player · Side ${side}`}
+          Pick player &middot; Side {side}
         </div>
         <div style={{ overflowY: "auto", display: "flex", flexDirection: "column", gap: 8 }}>
           {available.map((p) => (
@@ -674,49 +677,28 @@ function PlayerPicker({
             </button>
           ))}
         </div>
-        <form
-          onSubmit={(e) => {
-            e.preventDefault();
-            add();
+        <button
+          onClick={onRegisterNew}
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 8,
+            padding: "12px 0",
+            border: `1.5px dashed ${C.lime}`,
+            borderRadius: 12,
+            background: "rgba(200,255,77,0.06)",
+            color: C.lime,
+            fontWeight: 800,
+            fontSize: 14,
           }}
-          style={{ display: "flex", gap: 8 }}
         >
-          <label htmlFor="new-player" style={{ position: "absolute", left: -9999 }}>
-            New player name
-          </label>
-          <input
-            id="new-player"
-            ref={nameInput}
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="New player name"
-            style={{
-              flex: 1,
-              minWidth: 0,
-              padding: "10px 12px",
-              background: C.bg,
-              border: `1px solid ${C.border}`,
-              borderRadius: 10,
-              color: C.text,
-              fontFamily: "inherit",
-              fontSize: 14,
-            }}
-          />
-          <button
-            type="submit"
-            style={{
-              padding: "0 16px",
-              border: "none",
-              borderRadius: 10,
-              background: C.lime,
-              color: C.bg,
-              fontWeight: 800,
-              fontSize: 14,
-            }}
-          >
-            Add
-          </button>
-        </form>
+          <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke={C.lime} strokeWidth={2}>
+            <circle cx={12} cy={8} r={4} />
+            <path d="M4 20c0-4 3.6-6 8-6s8 2 8 6" />
+          </svg>
+          Register new face
+        </button>
         <div style={{ display: "flex", justifyContent: "space-between" }}>
           {canClear ? (
             <LinkButton onClick={() => onPick(null)}>Clear &amp; use face-rec</LinkButton>

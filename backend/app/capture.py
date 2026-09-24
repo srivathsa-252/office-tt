@@ -55,9 +55,15 @@ class RallyCapture:
 class EnrollRequest:
     id: int
     camera: Side
-    player_id: int
+    # None = scan-first: capture a face before anyone has typed a name, and
+    # attach it to a brand-new player once one is given (see /register below).
+    player_id: int | None
     created: float
-    status: str = "pending"  # pending | done | failed
+    status: str = "pending"  # pending | scanned | done | failed
+    # Set once status is "scanned": the captured, not-yet-attached samples.
+    vectors: list[list[float]] | None = None
+    evidence: dict | None = None
+    last_reason: str | None = None  # set on failure, for the UI to show why
 
 
 @dataclass
@@ -181,7 +187,7 @@ class CaptureHub:
         setup_active = self.setup_seen is not None and now() - self.setup_seen < SETUP_HEARTBEAT_STALE_S
         return live_match_exists or setup_active
 
-    def request_enroll(self, camera: Side, player_id: int) -> EnrollRequest:
+    def request_enroll(self, camera: Side, player_id: int | None) -> EnrollRequest:
         # One pending request per camera: a newer pick replaces an older one.
         for r in self.enroll_requests:
             if r.camera is camera and r.status == "pending":
@@ -194,6 +200,14 @@ class CaptureHub:
 
     def enroll_request(self, rid: int) -> EnrollRequest | None:
         return next((r for r in self.enroll_requests if r.id == rid), None)
+
+    def mark_scanned(self, rid: int, vectors: list[list[float]], evidence: dict) -> EnrollRequest | None:
+        req = self.enroll_request(rid)
+        if req is not None:
+            req.status = "scanned"
+            req.vectors = vectors
+            req.evidence = evidence
+        return req
 
 
 hub = CaptureHub()

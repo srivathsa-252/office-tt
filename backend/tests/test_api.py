@@ -272,6 +272,68 @@ def test_camera_status_reflects_which_cameras_are_posting(client):
     assert status["B"]["active"] is False
 
 
+def fake_vector(seed: float = 1.0) -> list[float]:
+    return [seed] + [0.0] * 127
+
+
+def test_scan_first_enroll_registers_a_new_player(client):
+    r = client.post("/api/capture/enroll-requests", json={"camera": "A"})
+    assert r.status_code == 201
+    rid = r.json()["id"]
+
+    status = client.get(f"/api/capture/enroll-requests/{rid}").json()
+    assert status == {"id": rid, "camera": "A", "player_id": None, "status": "pending", "reason": None}
+
+    r = client.post(
+        f"/api/capture/enroll-requests/{rid}/scanned",
+        json={"vectors": [fake_vector()] * 5, "evidence": {"why": "test"}},
+    )
+    assert r.status_code == 204
+    assert client.get(f"/api/capture/enroll-requests/{rid}").json()["status"] == "scanned"
+
+    r = client.post(f"/api/capture/enroll-requests/{rid}/register", json={"name": "Scanned Sam"})
+    assert r.status_code == 201
+    player = r.json()
+    assert player["name"] == "Scanned Sam"
+
+    gallery = {row["player_id"]: row["vectors"] for row in client.get("/api/face-gallery").json()}
+    assert len(gallery[player["id"]]) == 5
+    assert client.get(f"/api/capture/enroll-requests/{rid}").json()["status"] == "done"
+
+
+def test_enroll_register_before_scan_completes_is_conflict(client):
+    rid = client.post("/api/capture/enroll-requests", json={"camera": "A"}).json()["id"]
+    r = client.post(f"/api/capture/enroll-requests/{rid}/register", json={"name": "Too Soon"})
+    assert r.status_code == 409
+
+
+def test_scanned_rejects_a_request_that_already_has_a_player(client):
+    pr = add_players(client, "Praneeth")[0]
+    rid = client.post(
+        "/api/capture/enroll-requests", json={"camera": "A", "player_id": pr}
+    ).json()["id"]
+    r = client.post(
+        f"/api/capture/enroll-requests/{rid}/scanned",
+        json={"vectors": [fake_vector()] * 5},
+    )
+    assert r.status_code == 404
+
+
+def test_enroll_failed_handles_a_scan_first_request(client):
+    rid = client.post("/api/capture/enroll-requests", json={"camera": "A"}).json()["id"]
+    r = client.post(
+        f"/api/capture/enroll-requests/{rid}/failed",
+        json={"reason": "no face in view"},
+    )
+    assert r.status_code == 204
+    status = client.get(f"/api/capture/enroll-requests/{rid}").json()
+    assert status["status"] == "failed" and status["reason"] == "no face in view"
+
+
+def test_enroll_request_status_404_for_unknown_id(client):
+    assert client.get("/api/capture/enroll-requests/999999").status_code == 404
+
+
 @pytest.mark.parametrize(
     "body",
     [

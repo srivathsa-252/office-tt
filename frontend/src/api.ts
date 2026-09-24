@@ -2,6 +2,7 @@ import type {
   CameraStatus,
   Config,
   Detections,
+  EnrollStatus,
   Format,
   MatchState,
   PlayerRef,
@@ -30,6 +31,12 @@ export const api = {
   playerStats: (id: number) => req<PlayerStats>("GET", `/api/players/${id}/stats`),
   requestEnroll: (camera: SideKey, player_id: number) =>
     req<{ id: number }>("POST", "/api/capture/enroll-requests", { camera, player_id }),
+  // Scan-first: capture a face before anyone has typed a name.
+  startScan: (camera: SideKey) =>
+    req<{ id: number }>("POST", "/api/capture/enroll-requests", { camera }),
+  enrollStatus: (id: number) => req<EnrollStatus>("GET", `/api/capture/enroll-requests/${id}`),
+  registerScan: (id: number, name: string) =>
+    req<PlayerRef>("POST", `/api/capture/enroll-requests/${id}/register`, { name }),
   detections: () => req<Detections>("GET", "/api/capture/detections"),
   cameraStatus: () => req<Record<SideKey, CameraStatus>>("GET", "/api/capture/camera-status"),
   previewUrl: (camera: SideKey) => `/api/capture/preview/${camera}`,

@@ -124,11 +124,21 @@ class FacesIn(BaseModel):
 
 class EnrollRequestIn(BaseModel):
     camera: Side
-    player_id: int
+    # Omit to scan first and ask for a name only once the scan succeeds.
+    player_id: int | None = None
 
 
 class EnrollFailedIn(BaseModel):
     reason: str = Field(max_length=300)
+
+
+class EnrollScannedIn(BaseModel):
+    vectors: list[list[float]] = Field(min_length=1)
+    evidence: dict = {}
+
+
+class EnrollRegisterIn(BaseModel):
+    name: str = Field(min_length=1, max_length=80)
 
 
 def create_app(session_factory: sessionmaker | None = None, init: bool = True) -> FastAPI:
@@ -450,16 +460,25 @@ def create_app(session_factory: sessionmaker | None = None, init: bool = True) -
 
     @app.post("/api/capture/enroll-requests", status_code=201)
     def request_enroll(body: EnrollRequestIn, db: Session = Depends(get_db)):
-        player = db.get(Player, body.player_id)
-        if player is None:
-            raise HTTPException(404, "player not found")
+        if body.player_id is not None:
+            player = db.get(Player, body.player_id)
+            if player is None:
+                raise HTTPException(404, "player not found")
+            summary = (
+                f"{player.name} was picked by hand for Side {body.camera.value}, so camera "
+                f"{body.camera.value} is asked to learn their face."
+            )
+        else:
+            summary = (
+                f"Camera {body.camera.value} is asked to scan a new face — a name will be "
+                "asked for once the scan succeeds."
+            )
         req = hub.request_enroll(body.camera, body.player_id)
         record(
             db,
             "face.enroll_requested",
-            f"{player.name} was picked by hand for Side {body.camera.value}, so camera "
-            f"{body.camera.value} is asked to learn their face. It only does so if exactly one "
-            "face in view is unrecognised — otherwise it can't tell which face is theirs.",
+            summary + " It only does so if exactly one face in view is unrecognised — "
+            "otherwise it can't tell which face is theirs.",
             {"request_id": req.id},
         )
         db.commit()
@@ -473,20 +492,80 @@ def create_app(session_factory: sessionmaker | None = None, init: bool = True) -
             if r.camera is camera and r.status == "pending"
         ]
 
+    @app.get("/api/capture/enroll-requests/{rid}")
+    def enroll_request_status(rid: int):
+        req = hub.enroll_request(rid)
+        if req is None:
+            raise HTTPException(404, "no such request")
+        return {
+            "id": req.id,
+            "camera": req.camera.value,
+            "player_id": req.player_id,
+            "status": req.status,
+            "reason": req.last_reason,
+        }
+
     @app.post("/api/capture/enroll-requests/{rid}/failed", status_code=204)
     def enroll_failed(rid: int, body: EnrollFailedIn, db: Session = Depends(get_db)):
         req = hub.enroll_request(rid)
         if req is None or req.status != "pending":
             raise HTTPException(404, "no such pending request")
         req.status = "failed"
-        player = db.get(Player, req.player_id)
+        req.last_reason = body.reason
+        who = db.get(Player, req.player_id).name if req.player_id is not None else "the new face"
         record(
             db,
             "face.enroll_failed",
-            f"Camera {req.camera.value} didn't learn {player.name}'s face: {body.reason}",
+            f"Camera {req.camera.value} didn't learn {who}'s face: {body.reason}",
             {"request_id": rid},
         )
         db.commit()
+
+    @app.post("/api/capture/enroll-requests/{rid}/scanned", status_code=204)
+    def enroll_scanned(rid: int, body: EnrollScannedIn, db: Session = Depends(get_db)):
+        # The camera worker's terminal step for a scan-first (player_id is
+        # None) request: samples captured, held here until /register names them.
+        req = hub.enroll_request(rid)
+        if req is None or req.status != "pending" or req.player_id is not None:
+            raise HTTPException(404, "no such pending scan-first request")
+        try:
+            vectors = [normalise(v) for v in body.vectors]
+        except ValueError as e:
+            raise HTTPException(422, str(e))
+        hub.mark_scanned(rid, vectors, body.evidence)
+        record(
+            db,
+            "face.scanned",
+            f"Camera {req.camera.value} finished scanning a new face ({len(vectors)} "
+            "sample(s)) — waiting for a name.",
+            {"request_id": rid, **body.evidence},
+        )
+        db.commit()
+
+    @app.post("/api/capture/enroll-requests/{rid}/register", status_code=201)
+    def enroll_register(rid: int, body: EnrollRegisterIn, db: Session = Depends(get_db)):
+        req = hub.enroll_request(rid)
+        if req is None or req.status != "scanned" or req.vectors is None:
+            raise HTTPException(409, "this scan isn't ready to be named yet")
+        player = Player(name=body.name.strip())
+        db.add(player)
+        db.flush()
+        for v in req.vectors:
+            db.add(FaceEmbedding(player_id=player.id, vector=v, source=f"camera {req.camera.value}"))
+        total = len(req.vectors)
+        why = f"; {req.evidence['why']}" if req.evidence and req.evidence.get("why") else ""
+        record(
+            db,
+            "face.enrolled",
+            f"Registered {player.name} from a camera {req.camera.value} scan{why}. "
+            f"{player.name} now has {total} sample(s); a face matches them if its similarity "
+            "to any one of them clears the camera's threshold.",
+            {**(req.evidence or {}), "samples_added": total, "samples_total": total, "request_id": rid},
+        )
+        req.status = "done"
+        req.vectors = None  # no need to keep face vectors in memory longer than this
+        db.commit()
+        return player_ref(player)
 
     register_decisions_page(app, get_db)
     if (STATIC_DIR / "index.html").exists():

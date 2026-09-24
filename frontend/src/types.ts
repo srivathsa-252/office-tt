@@ -61,6 +61,14 @@ export interface CameraDetections {
 
 export type Detections = Record<SideKey, CameraDetections>;
 
+export interface EnrollStatus {
+  id: number;
+  camera: SideKey;
+  player_id: number | null;
+  status: "pending" | "scanned" | "done" | "failed";
+  reason: string | null;
+}
+
 export interface Synergy {
   pair_id: number;
   partner: PlayerRef;

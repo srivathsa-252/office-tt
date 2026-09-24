@@ -149,7 +149,7 @@ class FrameGrabber:
 @dataclass
 class EnrollSession:
     request_id: int
-    player_id: int
+    player_id: int | None  # None = scan-first: name comes after a successful scan
     started: float
     samples: list = field(default_factory=list)
     last_reason: str = "no face checked yet"
@@ -258,18 +258,30 @@ class CameraWorker:
             s.samples.append(m.embedding)
         if len(s.samples) >= ENROLL_SAMPLES:
             self._handled.add(s.request_id)
-            body = {
-                "vectors": [v.tolist() for v in s.samples],
-                "source": f"camera {self.side}",
-                "request_id": s.request_id,
-                "evidence": {
-                    "why": f"it was picked by hand and was the only unrecognised face in "
-                    f"camera {self.side}'s view for {ENROLL_SAMPLES} consecutive checks",
-                },
+            vectors = [v.tolist() for v in s.samples]
+            evidence = {
+                "why": f"it was picked by hand and was the only unrecognised face in "
+                f"camera {self.side}'s view for {ENROLL_SAMPLES} consecutive checks",
             }
             try:
-                self.api.request("POST", f"/api/players/{s.player_id}/faces", body)
-                self.refresh_gallery_now()
+                if s.player_id is not None:
+                    body = {
+                        "vectors": vectors,
+                        "source": f"camera {self.side}",
+                        "request_id": s.request_id,
+                        "evidence": evidence,
+                    }
+                    self.api.request("POST", f"/api/players/{s.player_id}/faces", body)
+                    self.refresh_gallery_now()
+                else:
+                    # Scan-first: hold the samples server-side until a name
+                    # comes in through POST .../register — nothing to add to
+                    # the gallery yet.
+                    self.api.request(
+                        "POST",
+                        f"/api/capture/enroll-requests/{s.request_id}/scanned",
+                        {"vectors": vectors, "evidence": evidence},
+                    )
             except Exception as e:
                 log.warning("enroll upload failed: %s", e)
             self.enroll = None
