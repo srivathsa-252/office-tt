@@ -1,0 +1,16 @@
+import react from "@vitejs/plugin-react";
+import { defineConfig } from "vite";
+
+const backend = process.env.TT_BACKEND ?? "http://localhost:8000";
+
+export default defineConfig({
+  plugins: [react()],
+  server: {
+    host: true,
+    proxy: {
+      "/api": backend,
+      "/decisions": backend,
+      "/ws": { target: backend.replace(/^http/, "ws"), ws: true },
+    },
+  },
+});
